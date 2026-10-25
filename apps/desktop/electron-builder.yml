@@ -40,3 +40,5 @@ publish:
   provider: github
   owner: CILXRY
   repo: chat_program
+  # Publish immediately when a v* tag is pushed (the default is a draft release).
+  releaseType: release
