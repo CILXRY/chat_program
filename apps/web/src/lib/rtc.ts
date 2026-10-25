@@ -1,3 +1,4 @@
+import { SdrScreenPipeline, isHdrDisplay, readForceSdr } from './screenCapture';
 import { useChatStore } from './store';
 import type { ServerEvent, VoiceParticipant } from './types';
 import { chatSocket } from './ws';
@@ -40,6 +41,7 @@ class VoiceClient {
   private micStream: MediaStream | null = null;
   private micTrack: MediaStreamTrack | null = null;
   private screenStream: MediaStream | null = null;
+  private screenPipeline: SdrScreenPipeline | null = null;
   private peers = new Map<number, PeerState>();
   private orphanIce = new Map<number, RTCIceCandidateInit[]>();
   private muted = false;
@@ -222,31 +224,68 @@ class VoiceClient {
     }
     if (this.channelId === null) return;
 
+    let rawStream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30, max: 30 } },
+      const options = {
+        video: {
+          frameRate: { ideal: 30, max: 30 },
+          cursor: 'always',
+        },
         audio: true,
-      });
-      const videoTrack = stream.getVideoTracks()[0];
-      if (!videoTrack) {
-        stream.getTracks().forEach((track) => track.stop());
+        systemAudio: 'include',
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'include',
+        monitorTypeSurfaces: 'include',
+      };
+      rawStream = await navigator.mediaDevices.getDisplayMedia(
+        options as DisplayMediaStreamOptions,
+      );
+
+      const rawVideoTrack = rawStream.getVideoTracks()[0];
+      if (!rawVideoTrack) {
+        rawStream.getTracks().forEach((track) => track.stop());
         return;
       }
-
-      videoTrack.addEventListener('ended', () => {
+      rawVideoTrack.addEventListener('ended', () => {
         void this.stopShare();
       });
+
+      let stream = rawStream;
+      let toneMapped = false;
+
+      // WebRTC is SDR here. Force HDR screen captures through a canvas so
+      // Chrome tone-maps PQ/Rec.2020 to sRGB before encoding.
+      if (readForceSdr() || isHdrDisplay()) {
+        const pipeline = new SdrScreenPipeline(rawStream, 30);
+        if ((await pipeline.start()) && pipeline.stream) {
+          this.screenPipeline = pipeline;
+          stream = pipeline.stream;
+          toneMapped = true;
+        }
+      }
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) {
+        this.screenPipeline?.stop();
+        this.screenPipeline = null;
+        rawStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
       this.screenStream = stream;
       this.sharing = true;
       const screenAudioTrack = stream.getAudioTracks()[0] ?? null;
 
       for (const peer of this.peers.values()) {
-        if (peer.videoSender) {
-          await peer.videoSender.replaceTrack(videoTrack);
-        }
-        if (peer.screenAudioSender) {
-          await peer.screenAudioSender.replaceTrack(screenAudioTrack);
+        try {
+          if (peer.videoSender) {
+            await peer.videoSender.replaceTrack(videoTrack);
+          }
+          if (peer.screenAudioSender) {
+            await peer.screenAudioSender.replaceTrack(screenAudioTrack);
+          }
+        } catch (error) {
+          console.warn('[rtc] failed to attach screen track to a peer', error);
         }
       }
 
@@ -259,19 +298,34 @@ class VoiceClient {
         channel_id: this.channelId,
         sharing: true,
       });
-      useChatStore.getState().showToast('屏幕共享已开始', 'info');
+      useChatStore.getState().showToast(
+        toneMapped ? '屏幕共享已开始（HDR 已转换为 SDR）' : '屏幕共享已开始',
+        'info',
+      );
     } catch (error) {
+      this.screenPipeline?.stop();
+      this.screenPipeline = null;
+      this.screenStream?.getTracks().forEach((track) => track.stop());
+      this.screenStream = null;
+      rawStream?.getTracks().forEach((track) => track.stop());
+      this.sharing = false;
+      useChatStore.getState().setVoice({ sharing: false, localScreen: null });
+
       const name = (error as DOMException | undefined)?.name;
       if (name === 'NotAllowedError') return;
       console.warn('[rtc] screen share failed', error);
-      useChatStore.getState().showToast('无法启动屏幕共享，请检查浏览器权限', 'error');
+      useChatStore
+        .getState()
+        .showToast('无法启动屏幕共享，请检查浏览器权限', 'error');
     }
   }
 
   async stopShare(): Promise<void> {
     if (!this.sharing && !this.screenStream) return;
     const stream = this.screenStream;
+    const pipeline = this.screenPipeline;
     this.screenStream = null;
+    this.screenPipeline = null;
     this.sharing = false;
 
     for (const peer of this.peers.values()) {
@@ -287,6 +341,7 @@ class VoiceClient {
       }
     }
 
+    pipeline?.stop();
     stream?.getTracks().forEach((track) => track.stop());
     useChatStore.getState().setVoice({ sharing: false, localScreen: null });
     if (this.channelId !== null) {
@@ -585,6 +640,8 @@ class VoiceClient {
     this.peers.clear();
     this.orphanIce.clear();
     this.micStream?.getTracks().forEach((track) => track.stop());
+    this.screenPipeline?.stop();
+    this.screenPipeline = null;
     this.screenStream?.getTracks().forEach((track) => track.stop());
     this.micStream = null;
     this.micTrack = null;

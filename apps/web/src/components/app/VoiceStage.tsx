@@ -4,6 +4,7 @@ import {
   Menu,
   Mic,
   MicOff,
+  Palette,
   PhoneOff,
   ScreenShare,
   ScreenShareOff,
@@ -14,6 +15,11 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { voiceClient } from '../../lib/rtc';
+import {
+  isHdrDisplay,
+  readForceSdr,
+  writeForceSdr,
+} from '../../lib/screenCapture';
 import { useChatStore } from '../../lib/store';
 import type { Channel, VoiceParticipant } from '../../lib/types';
 import Avatar from './Avatar';
@@ -56,6 +62,8 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
   const online = useChatStore((state) => state.online);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [forceSdr, setForceSdr] = useState(() => readForceSdr());
+  const [hdrDisplay, setHdrDisplay] = useState(() => isHdrDisplay());
 
   const inThisChannel = voice.channelId === channel.id;
   const isConnecting = inThisChannel && voice.status === 'connecting';
@@ -63,6 +71,27 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
   useEffect(() => {
     setExpanded(null);
   }, [channel.id]);
+
+  useEffect(() => {
+    const query = window.matchMedia('(dynamic-range: high)');
+    const update = () => setHdrDisplay(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  function toggleSdrCapture() {
+    const next = !forceSdr;
+    writeForceSdr(next);
+    setForceSdr(next);
+    useChatStore.getState().showToast(
+      next
+        ? '已开启强制 SDR 兼容，下次共享生效'
+        : hdrDisplay
+          ? '已关闭强制 SDR；检测到 HDR 时仍会自动转换'
+          : '已关闭强制 SDR 兼容',
+      'info',
+    );
+  }
 
   const meUser = me;
   const participants = voice.participants;
@@ -189,6 +218,9 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
             <p className="mt-3 text-[11px] text-mist-600">
               加入后浏览器会请求麦克风权限
             </p>
+            <p className="mt-1 text-[11px] text-mist-600">
+              HDR 屏幕会自动转为 SDR；若颜色仍异常，加入后开启「SDR 兼容」再共享。
+            </p>
           </div>
         </div>
       ) : (
@@ -259,7 +291,14 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
                     {participants.length} 人
                   </span>
                 </p>
-                <p className="mt-0.5 truncate text-xs text-mist-400">#{channel.name}</p>
+                <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-mist-400">
+                  #{channel.name}
+                  {hdrDisplay && (
+                    <span className="rounded-full border border-warn-400/20 bg-warn-400/10 px-1.5 py-0.5 text-[9px] font-medium text-warn-400">
+                      HDR → SDR
+                    </span>
+                  )}
+                </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5">
@@ -293,6 +332,25 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
                   <span className="hidden sm:inline">
                     {voice.sharing ? '停止共享' : '共享屏幕'}
                   </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleSdrCapture}
+                  aria-pressed={forceSdr}
+                  className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-medium transition ${
+                    forceSdr
+                      ? 'border-warn-400/30 bg-warn-400/10 text-warn-400 hover:bg-warn-400/15'
+                      : 'border-white/[0.07] bg-base-850 text-mist-300 hover:bg-base-800 hover:text-white'
+                  }`}
+                  title={
+                    hdrDisplay
+                      ? '检测到 HDR 显示器：屏幕共享会自动转为 SDR；开启此项可强制所有共享转换（下次共享生效）'
+                      : '屏幕颜色异常时开启：强制把共享画面转为 SDR（下次共享生效）'
+                  }
+                >
+                  <Palette size={16} />
+                  <span className="hidden sm:inline">SDR 兼容</span>
                 </button>
 
                 <button

@@ -16,7 +16,7 @@
 - 单工作区、多文字频道 / 语音频道
 - WebSocket 实时消息、在线状态、输入中提示、断线重连补消息
 - 语音频道：麦克风通话、静音、参与者状态
-- 屏幕共享：P2P mesh，支持同时共享画面与系统声音
+- 屏幕共享：P2P mesh，支持同时共享画面与系统声音；HDR 屏幕会自动 tone map 到 SDR 以避免偏色
 - 响应式深色 UI，桌面端三栏布局，小屏抽屉式侧栏
 - 一条命令启动 PostgreSQL + API；开发环境由 Vite 代理 `/api` 与 `/ws`，生产环境由 Caddy 统一入口
 
@@ -76,6 +76,7 @@ API 文档：<http://localhost:8000/docs>
 2. 用无痕窗口（或另一个浏览器）登录 `bob`，进入同一个语音频道。
 3. 任一方点击「共享屏幕」，选择窗口或屏幕；另一方即可看到画面。
 4. 浏览器必须允许麦克风 / 屏幕录制权限；`localhost` 属于安全来源，无需 HTTPS。
+5. 如果共享 HDR 屏幕时颜色发灰或明显不对：停止共享，在语音控制栏打开 **「SDR 兼容」**，然后重新共享。检测到 HDR 显示器时应用会自动转换，这个开关用于兜底。
 
 > 只用同一浏览器的两个标签页会共享登录 Cookie，两个标签都会是同一个账号。测试双向通话请使用普通窗口 + 无痕窗口，或两个浏览器。
 
@@ -142,7 +143,7 @@ Caddy 会通过 `host.docker.internal:4321` 代理到宿主机的 Astro 开发�
 │  └─ web/                    Astro 前端
 │     └─ src/
 │        ├─ components/app/   App / ChatView / VoiceStage / Sidebar ...
-│        ├─ lib/              api / ws / store / rtc
+│        ├─ lib/              api / ws / store / rtc / screenCapture
 │        ├─ pages/            login / register / channels/[channelId]
 │        └─ middleware.ts     服务端鉴权与跳转
 ├─ deploy/Caddyfile           生产反向代理（HTTP/HTTPS + WebSocket）
@@ -293,12 +294,25 @@ uv run ruff format --check .
 - 双浏览器端到端：进入语音频道 → 双向音轨建立 → 静音状态同步 → Alice 共享屏幕（含系统声音）→ Bob 看到远端视频 → 停止后再次共享 → 离开语音 → 实时消息与输入中提示
 - 可靠性：停掉 API → 客户端显示重连中 → 离线期间写入消息 → API 恢复后 WebSocket 自动重连，并恰好补回一次消息
 - Caddy：生产 HTTP、HTTPS（内部 CA，支持局域网 IP + `default_sni`）、`wss://` 与开发环境 HMR 均实测通过
+- SDR 兼容管线：强制开启后远端收到转换后的视频，停止共享与再次共享均正常
 
 ---
+
+## HDR 屏幕共享
+
+当前 WebRTC 编码链路按 SDR 发送，不传输 HDR，因此应用会在采集端做一次 **HDR → SDR tone mapping**：
+
+- 检测到当前显示器为 HDR（`(dynamic-range: high)`）时自动启用。
+- 自动检测不准、或共享的是另一块 HDR 屏幕时，可在语音控制栏点 **「SDR 兼容」** 强制启用；该设置会保存在浏览器本地，重新共享后生效。
+- 实现方式是把屏幕轨道绘制到 sRGB 2D canvas，再由 `canvas.captureStream(30)` 生成 SDR 视频轨道；音频仍使用原始系统音频。Chrome 会在绘制时按 HDR 元数据做 tone mapping。
+- 如果开启后颜色仍明显异常，通常是 Windows/Chromium 的 HDR 屏幕采集问题（WGC / DXGI）。请更新 Chrome/Edge 和 Windows 11（24H2+ 使用 WGC 采集），或临时关闭 Windows HDR 再共享。
+
+> HDR 转换会增加一次画面拷贝，目标帧率为 30fps；只影响开启了转换的共享。
 
 ## 已知限制 / 下一步
 
 - P2P mesh 超过 ~5 人时上行带宽和 CPU 会明显上升；后续可切换 LiveKit / mediasoup SFU。
+- 不支持 HDR 端到端透传；HDR 屏幕会转成 SDR 发送。
 - 屏幕共享推荐桌面版 Chrome / Edge；移动端浏览器和 Safari 对 `getDisplayMedia` 的支持有限。
 - 暂无附件上传、消息编辑、表情回应、未读角标、私信、多工作区、权限角色与密码重置。
 - 语音房间状态保存在单个 API 进程内存中；多实例部署需要 Redis pub/sub。
