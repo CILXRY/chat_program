@@ -1,5 +1,8 @@
-import { MicOff, ScreenShare, Users, X } from 'lucide-react';
+import { LoaderCircle, MicOff, ScreenShare, Shield, UserMinus, Users, X } from 'lucide-react';
+import { useState } from 'react';
+import { api } from '../../lib/api';
 import { useChatStore } from '../../lib/store';
+import type { User, VoiceState } from '../../lib/types';
 import Avatar from './Avatar';
 
 interface Props {
@@ -54,7 +57,7 @@ export default function MemberList({ open, onClose }: Props) {
           users={onlineUsers}
           onlineSet={onlineSet}
           voice={voice}
-          meId={me?.id}
+          me={me}
           empty="暂时没有其他人在线"
         />
         {offlineUsers.length > 0 && (
@@ -63,7 +66,7 @@ export default function MemberList({ open, onClose }: Props) {
             users={offlineUsers}
             onlineSet={onlineSet}
             voice={voice}
-            meId={me?.id}
+            me={me}
             empty=""
             muted
           />
@@ -86,15 +89,15 @@ function Group({
   users,
   onlineSet,
   voice,
-  meId,
+  me,
   empty,
   muted = false,
 }: {
   label: string;
-  users: ReturnType<typeof useChatStore.getState>['users'];
+  users: User[];
   onlineSet: Set<number>;
-  voice: ReturnType<typeof useChatStore.getState>['voice'];
-  meId: number | undefined;
+  voice: VoiceState;
+  me: User | null;
   empty: string;
   muted?: boolean;
 }) {
@@ -107,40 +110,126 @@ function Group({
         <p className="px-1 text-[11px] leading-5 text-mist-600">{empty}</p>
       ) : (
         <div className="space-y-0.5">
-          {users.map((user) => {
-            const online = onlineSet.has(user.id);
-            const voiceState =
-              voice.channelId !== null
-                ? voice.participants.find((participant) => participant.user_id === user.id)
-                : undefined;
-            return (
-              <div
-                key={user.id}
-                className={`flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 transition hover:bg-white/[0.035] ${
-                  muted ? 'opacity-55' : ''
-                }`}
-              >
-                <Avatar user={user} size={30} online={online} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium text-mist-200">
-                    {user.display_name}
-                    {user.id === meId && (
-                      <span className="ml-1 text-[10px] font-normal text-mist-600">你</span>
-                    )}
-                  </p>
-                  <p className="truncate text-[10px] text-mist-600">@{user.username}</p>
-                </div>
-                {voiceState?.sharing && (
-                  <ScreenShare size={13} className="shrink-0 text-accent-300" aria-label="正在共享屏幕" />
-                )}
-                {voiceState?.muted && (
-                  <MicOff size={13} className="shrink-0 text-mist-500" aria-label="已静音" />
-                )}
-              </div>
-            );
-          })}
+          {users.map((user) => (
+            <MemberRow
+              key={user.id}
+              user={user}
+              online={onlineSet.has(user.id)}
+              voice={voice}
+              me={me}
+              muted={muted}
+            />
+          ))}
         </div>
       )}
     </section>
+  );
+}
+
+function MemberRow({
+  user,
+  online,
+  voice,
+  me,
+  muted,
+}: {
+  user: User;
+  online: boolean;
+  voice: VoiceState;
+  me: User | null;
+  muted: boolean;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
+  const isSelf = user.id === me?.id;
+  const canModerate = me?.role === 'admin' && !isSelf;
+  const voiceState =
+    voice.channelId !== null
+      ? voice.participants.find((participant) => participant.user_id === user.id)
+      : undefined;
+
+  async function handleRemove() {
+    if (pending) return;
+    setPending(true);
+    try {
+      await api.removeMember(user.id);
+      useChatStore.getState().removeUser(user.id);
+      useChatStore.getState().showToast(`已移除 ${user.display_name}`, 'info');
+    } catch {
+      useChatStore.getState().showToast('移除成员失败，请稍后再试', 'error');
+    } finally {
+      setPending(false);
+      setConfirming(false);
+    }
+  }
+
+  return (
+    <div>
+      <div
+        className={`group flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 transition hover:bg-white/[0.035] ${
+          muted ? 'opacity-55' : ''
+        }`}
+      >
+        <Avatar user={user} size={30} online={online} />
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1 truncate text-[13px] font-medium text-mist-200">
+            <span className="truncate">{user.display_name}</span>
+            {user.role === 'admin' && (
+              <Shield
+                size={11}
+                className="shrink-0 text-accent-300"
+                aria-label="管理员"
+              />
+            )}
+            {isSelf && (
+              <span className="shrink-0 text-[10px] font-normal text-mist-600">你</span>
+            )}
+          </p>
+          <p className="truncate text-[10px] text-mist-600">@{user.username}</p>
+        </div>
+        {voiceState?.sharing && (
+          <ScreenShare size={13} className="shrink-0 text-accent-300" aria-label="正在共享屏幕" />
+        )}
+        {voiceState?.muted && (
+          <MicOff size={13} className="shrink-0 text-mist-500" aria-label="已静音" />
+        )}
+        {canModerate && !confirming && (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-mist-600 opacity-0 transition hover:bg-white/5 hover:text-danger-400 group-hover:opacity-100"
+            aria-label={`移除 ${user.display_name}`}
+            title="移除成员"
+          >
+            <UserMinus size={13} />
+          </button>
+        )}
+      </div>
+
+      {confirming && (
+        <div className="mb-1 ml-9 flex items-center gap-1.5 rounded-lg border border-danger-400/20 bg-danger-400/[0.06] px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-[10px] text-danger-400">
+            移除 {user.display_name}？
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleRemove()}
+            disabled={pending}
+            className="flex h-6 items-center gap-1 rounded-md bg-danger-400/90 px-2 text-[10px] font-medium text-white transition hover:bg-danger-400 disabled:opacity-60"
+          >
+            {pending && <LoaderCircle size={10} className="animate-spin" />}
+            确认
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            disabled={pending}
+            className="h-6 rounded-md px-1.5 text-[10px] text-mist-400 transition hover:text-mist-200"
+          >
+            取消
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

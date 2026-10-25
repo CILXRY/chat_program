@@ -8,6 +8,7 @@ import {
   Plus,
   ScreenShare,
   ScreenShareOff,
+  Settings,
   Volume2,
   X,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ interface Props {
   onCloseMobile: () => void;
   onSelectChannel: (id: number) => void;
   onCreateChannel: (type: ChannelType) => void;
+  onOpenSettings: () => void;
   onLogout: () => void;
 }
 
@@ -36,6 +38,7 @@ export default function Sidebar({
   onCloseMobile,
   onSelectChannel,
   onCreateChannel,
+  onOpenSettings,
   onLogout,
 }: Props) {
   const me = useChatStore((state) => state.me);
@@ -285,8 +288,22 @@ export default function Sidebar({
             >
               <span className={`h-1.5 w-1.5 rounded-full ${connectionInfo.dot}`} />
               {connectionInfo.label}
+              {me.role === 'admin' && (
+                <span className="ml-auto rounded-full bg-accent-500/10 px-1.5 py-px text-[9px] text-accent-300">
+                  管理员
+                </span>
+              )}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="grid h-8 w-8 place-items-center rounded-lg text-mist-500 transition hover:bg-white/5 hover:text-mist-200"
+            aria-label="设置"
+            title="设置"
+          >
+            <Settings size={16} />
+          </button>
           <button
             type="button"
             onClick={onLogout}

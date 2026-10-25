@@ -36,3 +36,16 @@ export function onDesktopShortcut(
     return () => undefined;
   }
 }
+
+export function openDesktopSettings(): void {
+  try {
+    window.nebulaDesktop?.openSettings();
+  } catch (error) {
+    console.warn('[desktop] settings bridge failed', error);
+  }
+}
+
+export function desktopPlatform(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.nebulaDesktop?.platform ?? null;
+}

@@ -1,8 +1,11 @@
+export type UserRole = 'admin' | 'member';
+
 export interface User {
   id: number;
   username: string;
   display_name: string;
   avatar_color: string;
+  role: UserRole;
   created_at: string;
 }
 
@@ -14,6 +17,7 @@ export interface Channel {
   type: ChannelType;
   topic: string | null;
   position: number;
+  created_by: number | null;
   created_at: string;
 }
 
@@ -74,7 +78,12 @@ export type ServerEvent =
   | { type: 'message.deleted'; channel_id: number; message_id: number }
   | { type: 'typing.start'; channel_id: number; user: { id: number; display_name: string } }
   | { type: 'channel.created'; channel: Channel }
+  | { type: 'channel.updated'; channel: Channel }
+  | { type: 'channel.deleted'; channel_id: number }
   | { type: 'user.created'; user: User }
+  | { type: 'user.updated'; user: User }
+  | { type: 'member.removed'; user_id: number }
+  | { type: 'member.restored'; user: User }
   | { type: 'subscribed'; channel_id: number }
   | { type: 'voice.state'; channel_id: number; participants: VoiceParticipant[] }
   | {

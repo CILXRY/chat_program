@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { notifyDesktop, onDesktopShortcut } from '../../lib/desktop';
+import { getPrefs } from '../../lib/prefs';
 import { voiceClient } from '../../lib/rtc';
 import { useChatStore } from '../../lib/store';
 import type {
@@ -16,6 +17,7 @@ import ChatView from './ChatView';
 import CreateChannelModal from './CreateChannelModal';
 import MemberList from './MemberList';
 import Sidebar from './Sidebar';
+import SettingsModal from './settings/SettingsModal';
 import Toast from './Toast';
 import VoiceStage from './VoiceStage';
 
@@ -47,6 +49,7 @@ type ChatState = ReturnType<typeof useChatStore.getState>;
 type VoiceStateEvent = Extract<ServerEvent, { type: 'voice.state' }>;
 
 function notifyShareChanges(state: ChatState, event: VoiceStateEvent): void {
+  if (!getPrefs().desktopNotifications) return;
   if (state.voice.channelId !== event.channel_id) return;
   if (state.voice.participants.length === 0) return;
 
@@ -120,6 +123,7 @@ export default function App(props: Props) {
     () => window.matchMedia('(min-width: 1280px)').matches,
   );
   const [createType, setCreateType] = useState<ChannelType | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribeEvent = chatSocket.onEvent((event: ServerEvent) => {
@@ -143,7 +147,34 @@ export default function App(props: Props) {
         case 'channel.created':
           store.addChannel(event.channel);
           break;
+        case 'channel.updated':
+          store.updateChannel(event.channel);
+          break;
+        case 'channel.deleted':
+          if (store.voice.channelId === event.channel_id) {
+            voiceClient.leave();
+          }
+          store.removeChannel(event.channel_id);
+          break;
         case 'user.created':
+          store.upsertUser(event.user);
+          break;
+        case 'user.updated':
+          if (store.me?.id === event.user.id) {
+            store.replaceMe(event.user);
+          } else {
+            store.upsertUser(event.user);
+          }
+          break;
+        case 'member.removed':
+          store.removeUser(event.user_id);
+          if (event.user_id === store.me?.id) {
+            window.location.assign('/login');
+          } else {
+            store.showToast('一名成员已被管理员移除', 'info');
+          }
+          break;
+        case 'member.restored':
           store.upsertUser(event.user);
           break;
         case 'voice.state':
@@ -215,6 +246,14 @@ export default function App(props: Props) {
   }, [channels]);
 
   useEffect(() => {
+    if (activeChannelId === null) return;
+    const path = `/channels/${activeChannelId}`;
+    if (window.location.pathname !== path) {
+      window.history.replaceState({}, '', path);
+    }
+  }, [activeChannelId]);
+
+  useEffect(() => {
     if (!activeChannel) return;
     const channelId = activeChannel.id;
     if (chatSocket.connected) {
@@ -284,6 +323,7 @@ export default function App(props: Props) {
         onCloseMobile={() => setSidebarOpen(false)}
         onSelectChannel={selectChannel}
         onCreateChannel={(type) => setCreateType(type)}
+        onOpenSettings={() => setSettingsOpen(true)}
         onLogout={() => void logout()}
       />
 
@@ -330,6 +370,8 @@ export default function App(props: Props) {
           onCreated={(channel) => selectChannel(channel.id)}
         />
       )}
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       <Toast />
     </div>

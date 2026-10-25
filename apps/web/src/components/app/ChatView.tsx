@@ -5,16 +5,19 @@ import {
   LoaderCircle,
   Menu,
   Send,
+  Settings2,
   Trash2,
   Users,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api';
+import { usePrefs } from '../../lib/prefs';
 import { chatSocket } from '../../lib/ws';
 import { useChatStore } from '../../lib/store';
 import type { Channel, Message } from '../../lib/types';
 import { useNow } from '../../hooks/useNow';
 import Avatar from './Avatar';
+import ChannelSettingsModal from './ChannelSettingsModal';
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_TYPING: { id: number; display_name: string; expiresAt: number }[] = [];
@@ -87,12 +90,17 @@ export default function ChatView({ channel, onOpenSidebar, onOpenMembers }: Prop
   const online = useChatStore((state) => state.online);
   const typing = useChatStore((state) => state.typing[channel.id] ?? EMPTY_TYPING);
   const now = useNow(1000);
+  const compact = usePrefs().messageDensity === 'compact';
 
   const [draft, setDraft] = useState('');
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [editingChannel, setEditingChannel] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const lastTypingSent = useRef(0);
+
+  const canManageChannel =
+    me?.role === 'admin' || (channel.created_by !== null && channel.created_by === me?.id);
 
   const rows = useMemo(() => buildRows(messages), [messages]);
   const activeTyping = typing.filter((item) => item.expiresAt > now && item.id !== me?.id);
@@ -219,6 +227,17 @@ export default function ChatView({ channel, onOpenSidebar, onOpenMembers }: Prop
             <span className="h-1.5 w-1.5 rounded-full bg-mint-400" />
             {online.length} 在线
           </span>
+          {canManageChannel && (
+            <button
+              type="button"
+              onClick={() => setEditingChannel(true)}
+              className="grid h-9 w-9 place-items-center rounded-lg text-mist-400 transition hover:bg-white/5 hover:text-mist-100"
+              aria-label="频道设置"
+              title="频道设置"
+            >
+              <Settings2 size={17} />
+            </button>
+          )}
           <button
             type="button"
             onClick={onOpenMembers}
@@ -295,9 +314,11 @@ export default function ChatView({ channel, onOpenSidebar, onOpenMembers }: Prop
                   </div>
                 )}
                 <article
-                  className={`group relative flex gap-3 rounded-lg px-2 py-1 transition hover:bg-white/[0.022] ${
-                    showHeader ? 'mt-3' : ''
-                  } ${message.pending ? 'opacity-60' : ''}`}
+                  className={`group relative flex gap-3 rounded-lg px-2 transition hover:bg-white/[0.022] ${
+                    compact ? 'py-0.5' : 'py-1'
+                  } ${showHeader ? (compact ? 'mt-2' : 'mt-3') : ''} ${
+                    message.pending ? 'opacity-60' : ''
+                  }`}
                 >
                   {showHeader ? (
                     <Avatar user={message.author} size={36} className="mt-0.5" />
@@ -327,7 +348,11 @@ export default function ChatView({ channel, onOpenSidebar, onOpenMembers }: Prop
                         )}
                       </div>
                     )}
-                    <p className="whitespace-pre-wrap break-words text-[14.5px] leading-[1.75] text-mist-200">
+                    <p
+                      className={`whitespace-pre-wrap break-words text-[14.5px] text-mist-200 ${
+                        compact ? 'leading-[1.55]' : 'leading-[1.75]'
+                      }`}
+                    >
                       {message.content}
                     </p>
                     {message.failed && (
@@ -405,6 +430,13 @@ export default function ChatView({ channel, onOpenSidebar, onOpenMembers }: Prop
           Enter 发送 · Shift + Enter 换行 · 消息会同步给频道里的所有人
         </p>
       </div>
+
+      {editingChannel && (
+        <ChannelSettingsModal
+          channel={channel}
+          onClose={() => setEditingChannel(false)}
+        />
+      )}
     </section>
   );
 }
