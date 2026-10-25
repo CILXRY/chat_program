@@ -51,7 +51,11 @@ interface ChatStore {
   setChannels: (channels: Channel[]) => void;
   setUsers: (users: User[]) => void;
   upsertUser: (user: User) => void;
+  replaceMe: (user: User) => void;
+  removeUser: (id: number) => void;
   addChannel: (channel: Channel) => void;
+  updateChannel: (channel: Channel) => void;
+  removeChannel: (id: number) => void;
   setActiveChannel: (id: number) => void;
   setMessageStatus: (channelId: number, status: 'idle' | 'loading' | 'ready') => void;
   setMessages: (channelId: number, messages: Message[], hasMore: boolean) => void;
@@ -143,6 +147,35 @@ export const useChatStore = create<ChatStore>((set) => ({
       if (state.channels.some((item) => item.id === channel.id)) return state;
       return { channels: sortChannels([...state.channels, channel]) };
     }),
+
+  updateChannel: (channel) =>
+    set((state) => ({
+      channels: sortChannels(
+        state.channels.map((item) => (item.id === channel.id ? channel : item)),
+      ),
+    })),
+
+  removeChannel: (id) =>
+    set((state) => {
+      const channels = state.channels.filter((channel) => channel.id !== id);
+      const activeChannelId =
+        state.activeChannelId === id
+          ? (channels[0]?.id ?? null)
+          : state.activeChannelId;
+      return { channels, activeChannelId };
+    }),
+
+  replaceMe: (user) =>
+    set((state) => ({
+      me: user,
+      users: state.users.map((item) => (item.id === user.id ? user : item)),
+    })),
+
+  removeUser: (id) =>
+    set((state) => ({
+      users: state.users.filter((user) => user.id !== id),
+      online: state.online.filter((userId) => userId !== id),
+    })),
 
   setActiveChannel: (id) => set({ activeChannelId: id }),
 

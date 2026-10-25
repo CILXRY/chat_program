@@ -97,10 +97,19 @@ class ChatSocket {
       socket.close();
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       this.stopHeartbeat();
       if (this.socket === socket) {
         this.socket = null;
+      }
+      if (event.code === 4401) {
+        // The account was removed or the session expired: stop retrying.
+        this.manuallyClosed = true;
+        this.emitStatus('closed');
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.assign('/login');
+        }
+        return;
       }
       this.emitStatus('closed');
       if (!this.manuallyClosed) {

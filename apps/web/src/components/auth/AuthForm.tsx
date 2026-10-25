@@ -6,9 +6,16 @@ import {
   LockKeyhole,
   Sparkles,
   UserRound,
+  X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ApiError, api } from '../../lib/api';
+import {
+  clearLastLogin,
+  readLastLogin,
+  writeLastLogin,
+  type LastLogin,
+} from '../../lib/lastLogin';
 
 interface Props {
   mode: 'login' | 'register';
@@ -18,6 +25,7 @@ interface Props {
 function describeError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return '用户名或密码不正确。';
+    if (error.status === 403) return '这个账号已被移除，请联系管理员。';
     if (error.status === 409) return '这个用户名已经被占用了，换一个试试。';
     if (error.status === 422) {
       return '请检查输入：用户名 3–24 位（字母、数字、下划线），密码至少 8 位。';
@@ -29,17 +37,38 @@ function describeError(error: unknown): string {
   return '网络出了点问题，请稍后再试。';
 }
 
+function initialOf(name: string): string {
+  return name.trim().slice(0, 1).toUpperCase() || '?';
+}
+
 export default function AuthForm({ mode, next }: Props) {
   const isRegister = mode === 'register';
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [quickLogin, setQuickLogin] = useState<LastLogin | null>(() => readLastLogin());
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   const target = next && next.startsWith('/') && !next.startsWith('//') ? next : '/app';
   const switchQuery = next ? `?next=${encodeURIComponent(next)}` : '';
+
+  function useQuickLogin(entry: LastLogin) {
+    setUsername(entry.username);
+    setRemember(entry.remember);
+    setError(null);
+    passwordRef.current?.focus();
+  }
+
+  function dismissQuickLogin() {
+    clearLastLogin();
+    setQuickLogin(null);
+    setUsername('');
+    setPassword('');
+  }
 
   async function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,13 +78,25 @@ export default function AuthForm({ mode, next }: Props) {
 
     try {
       if (isRegister) {
-        await api.register({
+        const user = await api.register({
           username: username.trim(),
           display_name: displayName.trim() || undefined,
           password,
         });
+        writeLastLogin({
+          username: user.username,
+          display_name: user.display_name,
+          avatar_color: user.avatar_color,
+          remember: true,
+        });
       } else {
-        await api.login(username.trim(), password);
+        const user = await api.login(username.trim(), password, remember);
+        writeLastLogin({
+          username: user.username,
+          display_name: user.display_name,
+          avatar_color: user.avatar_color,
+          remember,
+        });
       }
       window.location.assign(target);
     } catch (submitError) {
@@ -66,6 +107,48 @@ export default function AuthForm({ mode, next }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {!isRegister && quickLogin && (
+        <div className="animate-fade-in rounded-2xl border border-accent-500/20 bg-accent-500/[0.06] p-3">
+          <div className="flex items-center gap-3">
+            <span
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-semibold text-white"
+              style={{ backgroundColor: quickLogin.avatar_color }}
+            >
+              {initialOf(quickLogin.display_name)}
+            </span>
+            <button
+              type="button"
+              onClick={() => useQuickLogin(quickLogin)}
+              className="min-w-0 flex-1 text-left"
+            >
+              <span className="block truncate text-sm font-medium text-mist-100">
+                继续作为 {quickLogin.display_name}
+              </span>
+              <span className="block truncate text-[11px] text-mist-500">
+                @{quickLogin.username} · 点击填入用户名
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => useQuickLogin(quickLogin)}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-500/15 text-accent-300 transition hover:bg-accent-500/25"
+              aria-label={`继续使用 ${quickLogin.display_name} 登录`}
+              title="继续登录"
+            >
+              <ArrowRight size={15} />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={dismissQuickLogin}
+            className="mt-1.5 flex items-center gap-1 pl-[52px] text-[11px] text-mist-500 transition hover:text-mist-300"
+          >
+            <X size={11} />
+            不是本人？清除记录
+          </button>
+        </div>
+      )}
+
       <div>
         <label htmlFor="username" className="mb-1.5 block text-xs font-medium text-mist-400">
           用户名
@@ -136,6 +219,7 @@ export default function AuthForm({ mode, next }: Props) {
           <input
             id="password"
             name="password"
+            ref={passwordRef}
             required
             minLength={isRegister ? 8 : 1}
             maxLength={72}
@@ -157,6 +241,18 @@ export default function AuthForm({ mode, next }: Props) {
         </div>
       </div>
 
+      {!isRegister && (
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-mist-400">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(event) => setRemember(event.target.checked)}
+            className="h-3.5 w-3.5 rounded border-base-600 bg-base-950 accent-accent-500"
+          />
+          记住我（30 天内免登录）
+        </label>
+      )}
+
       {error && (
         <div
           role="alert"
@@ -175,7 +271,7 @@ export default function AuthForm({ mode, next }: Props) {
           <LoaderCircle size={17} className="animate-spin" />
         ) : (
           <>
-            {isRegister ? '创建账号' : '登录'} 
+            {isRegister ? '创建账号' : '登录'}
             <ArrowRight
               size={16}
               className="transition-transform group-hover:translate-x-0.5"
@@ -193,7 +289,6 @@ export default function AuthForm({ mode, next }: Props) {
           {isRegister ? '去登录' : '创建一个'}
         </a>
       </p>
-
     </form>
   );
 }

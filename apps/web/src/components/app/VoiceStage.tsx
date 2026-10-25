@@ -8,6 +8,7 @@ import {
   PhoneOff,
   ScreenShare,
   ScreenShareOff,
+  Settings2,
   ShieldCheck,
   Users,
   Volume2,
@@ -23,6 +24,7 @@ import {
 import { useChatStore } from '../../lib/store';
 import type { Channel, VoiceParticipant } from '../../lib/types';
 import Avatar from './Avatar';
+import ChannelSettingsModal from './ChannelSettingsModal';
 
 interface Props {
   channel: Channel;
@@ -64,9 +66,12 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
   const [copied, setCopied] = useState(false);
   const [forceSdr, setForceSdr] = useState(() => readForceSdr());
   const [hdrDisplay, setHdrDisplay] = useState(() => isHdrDisplay());
+  const [editingChannel, setEditingChannel] = useState(false);
 
   const inThisChannel = voice.channelId === channel.id;
   const isConnecting = inThisChannel && voice.status === 'connecting';
+  const canManageChannel =
+    me?.role === 'admin' || (channel.created_by !== null && channel.created_by === me?.id);
 
   useEffect(() => {
     setExpanded(null);
@@ -149,6 +154,17 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
             <span className="h-1.5 w-1.5 rounded-full bg-mint-400" />
             {online.length} 在线
           </span>
+          {canManageChannel && (
+            <button
+              type="button"
+              onClick={() => setEditingChannel(true)}
+              className="grid h-9 w-9 place-items-center rounded-lg text-mist-400 transition hover:bg-white/5 hover:text-mist-100"
+              aria-label="频道设置"
+              title="频道设置"
+            >
+              <Settings2 size={17} />
+            </button>
+          )}
           <button
             type="button"
             onClick={onOpenMembers}
@@ -217,9 +233,6 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
             </button>
             <p className="mt-3 text-[11px] text-mist-600">
               加入后浏览器会请求麦克风权限
-            </p>
-            <p className="mt-1 text-[11px] text-mist-600">
-              HDR 屏幕会自动转为 SDR；若颜色仍异常，加入后开启「SDR 兼容」再共享。
             </p>
           </div>
         </div>
@@ -419,6 +432,13 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
             </div>
           );
         })()}
+
+      {editingChannel && (
+        <ChannelSettingsModal
+          channel={channel}
+          onClose={() => setEditingChannel(false)}
+        />
+      )}
     </section>
   );
 }

@@ -4,6 +4,7 @@ import type {
   Message,
   MessagePage,
   User,
+  UserRole,
 } from './types';
 
 export class ApiError extends Error {
@@ -52,10 +53,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  login(username: string, password: string): Promise<User> {
+  login(username: string, password: string, remember = true): Promise<User> {
     return request<User>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, remember }),
     });
   },
 
@@ -74,12 +75,51 @@ export const api = {
     return request<void>('/api/auth/logout', { method: 'POST' });
   },
 
+  changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    return request<void>('/api/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+  },
+
   getChannels(): Promise<Channel[]> {
     return request<Channel[]>('/api/channels');
   },
 
   getUsers(): Promise<User[]> {
     return request<User[]>('/api/users');
+  },
+
+  getRemovedUsers(): Promise<User[]> {
+    return request<User[]>('/api/users?removed=true');
+  },
+
+  updateProfile(input: {
+    display_name?: string;
+    avatar_color?: string;
+  }): Promise<User> {
+    return request<User>('/api/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+
+  removeMember(userId: number): Promise<void> {
+    return request<void>(`/api/users/${userId}`, { method: 'DELETE' });
+  },
+
+  restoreMember(userId: number): Promise<User> {
+    return request<User>(`/api/users/${userId}/restore`, { method: 'POST' });
+  },
+
+  setUserRole(userId: number, role: UserRole): Promise<User> {
+    return request<User>(`/api/users/${userId}/role`, {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    });
   },
 
   getMessages(channelId: number, before?: number): Promise<MessagePage> {
@@ -115,5 +155,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  },
+
+  updateChannel(
+    channelId: number,
+    input: { name?: string; topic?: string | null },
+  ): Promise<Channel> {
+    return request<Channel>(`/api/channels/${channelId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteChannel(channelId: number): Promise<void> {
+    return request<void>(`/api/channels/${channelId}`, { method: 'DELETE' });
   },
 };
