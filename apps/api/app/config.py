@@ -16,7 +16,8 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "dev-only-secret-change-before-deploying"
     jwt_algorithm: str = "HS256"
-    jwt_expire_days: int = 7
+    jwt_session_days: int = 1
+    jwt_remember_days: int = 30
 
     cookie_name: str = "nebula_token"
     cookie_secure: bool = False

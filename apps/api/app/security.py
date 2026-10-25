@@ -36,12 +36,12 @@ def pick_avatar_color(seed: str) -> str:
     return AVATAR_PALETTE[sum(ord(ch) for ch in seed) % len(AVATAR_PALETTE)]
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, days: int | None = None) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "iat": now,
-        "exp": now + timedelta(days=settings.jwt_expire_days),
+        "exp": now + timedelta(days=days if days is not None else settings.jwt_session_days),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
@@ -57,11 +57,11 @@ def decode_access_token(token: str) -> int | None:
         return None
 
 
-def set_auth_cookie(response: Response, token: str) -> None:
+def set_auth_cookie(response: Response, token: str, max_age: int) -> None:
     response.set_cookie(
         key=settings.cookie_name,
         value=token,
-        max_age=settings.jwt_expire_days * 24 * 60 * 60,
+        max_age=max_age,
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
@@ -103,9 +103,18 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
             detail="Invalid or expired session",
         )
     user = await db.get(User, user_id)
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User no longer exists",
+        )
+    return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator access required",
         )
     return user

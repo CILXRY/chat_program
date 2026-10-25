@@ -24,7 +24,7 @@ async def _authenticate(token: str | None) -> dict | None:
         return None
     async with SessionLocal() as db:
         user = await db.get(User, user_id)
-        if user is None:
+        if user is None or not user.is_active:
             return None
         return UserPublic.model_validate(user).model_dump(mode="json")
 
