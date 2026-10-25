@@ -12,13 +12,15 @@
 
 ## 功能
 
-- 账号注册 / 登录（JWT + httpOnly Cookie）
-- 单工作区、多文字频道 / 语音频道
+- 账号注册 / 登录（JWT + httpOnly Cookie）；记住上次登录账号并支持 30 天「记住我」
+- 单工作区、多文字频道 / 语音频道；管理员可修改所有频道，成员可修改自己创建的频道
+- 管理员可以在设置里管理成员：提升 / 取消管理员、移除、恢复
+- 个人设置：显示名称、头像颜色、修改密码；通知与消息密度偏好保存在本地
 - WebSocket 实时消息、在线状态、输入中提示、断线重连补消息
 - 语音频道：麦克风通话、静音、参与者状态
 - 屏幕共享：P2P mesh，支持同时共享画面与系统声音；HDR 屏幕会自动 tone map 到 SDR 以避免偏色
 - 响应式深色 UI，桌面端三栏布局，小屏抽屉式侧栏
-- Windows 桌面客户端：托盘、开机启动、全局快捷键、自定义屏幕源选择、自动更新
+- Windows 桌面客户端：托盘、开机启动、全局快捷键、自定义屏幕源选择、自动更新；账号设置与网页端共用
 - 一条命令启动 PostgreSQL + API；开发环境由 Vite 代理 `/api` 与 `/ws`，生产环境由 Caddy 统一入口
 
 > 语音与屏幕共享基于 P2P mesh，建议 **2–5 人**使用。需要跨公网稳定通话时请配置 TURN（见下文）。
@@ -55,7 +57,7 @@ pnpm dev
 
 | 账号 | 密码 | 说明 |
 | --- | --- | --- |
-| `alice` | `nebula123` | 演示用户 A |
+| `alice` | `nebula123` | 演示用户 A（管理员） |
 | `bob` | `nebula123` | 演示用户 B，适合双窗口测试 |
 
 API 文档：<http://localhost:8000/docs>
@@ -80,6 +82,14 @@ API 文档：<http://localhost:8000/docs>
 5. 如果共享 HDR 屏幕时颜色发灰或明显不对：停止共享，在语音控制栏打开 **「SDR 兼容」**，然后重新共享。检测到 HDR 显示器时应用会自动转换，这个开关用于兜底。
 
 > 只用同一浏览器的两个标签页会共享登录 Cookie，两个标签都会是同一个账号。测试双向通话请使用普通窗口 + 无痕窗口，或两个浏览器。
+
+### 账号、权限与设置
+
+- **首个注册账号自动成为管理员**；管理员可以提升或取消其他成员的管理员身份，但不能修改自己的角色。
+- **频道权限**：管理员可修改 / 删除所有频道；普通成员只能修改 / 删除自己创建的频道。至少需要保留一个频道。
+- **移除成员**：管理员可在「设置 → 成员」或成员列表里移除成员。被移除的账号会立即下线、无法登录、从成员列表隐藏，历史消息保留；可在设置里恢复。用户名会保留，不能被重新注册。
+- **设置**：Web 与 Windows 客户端共用，包含账号资料（显示名称、头像颜色）、修改密码、桌面通知开关和消息密度；桌面端另有「桌面客户端」入口，可打开原生设置窗口（托盘、开机启动、快捷键、更新）。
+- **快速登录**：登录页会在浏览器本地记住上次登录的用户名和头像（不保存密码），点击即可填入；勾选「记住我」后登录有效期为 30 天，否则为 1 天。
 
 ### 开发环境局域网 HTTPS（可选）
 
@@ -143,8 +153,8 @@ Caddy 会通过 `host.docker.internal:4321` 代理到宿主机的 Astro 开发�
 │  │  └─ tests/               pytest（SQLite 内存库）
 │  ├─ web/                    Astro 前端
 │  │  └─ src/
-│  │     ├─ components/app/   App / ChatView / VoiceStage / Sidebar ...
-│  │     ├─ lib/              api / ws / store / rtc / screenCapture / desktop
+│  │     ├─ components/app/   App / ChatView / VoiceStage / Sidebar / settings ...
+│  │     ├─ lib/              api / ws / store / rtc / screenCapture / prefs / desktop
 │  │     ├─ pages/            login / register / channels/[channelId]
 │  │     └─ middleware.ts     服务端鉴权与跳转
 │  └─ desktop/                Electron Windows 客户端
@@ -172,7 +182,8 @@ Caddy 会通过 `host.docker.internal:4321` 代理到宿主机的 Astro 开发�
 | `POSTGRES_USER` | `nebula` | 数据库用户 |
 | `POSTGRES_PASSWORD` | `nebula_dev_password` | 数据库密码，生产务必修改 |
 | `JWT_SECRET` | 开发占位值 | JWT 签名密钥，生产必须设置为随机长字符串 |
-| `JWT_EXPIRE_DAYS` | `7` | 登录有效期 |
+| `JWT_REMEMBER_DAYS` | `30` | 勾选「记住我」时的登录有效期（天） |
+| `JWT_SESSION_DAYS` | `1` | 未勾选「记住我」时的登录有效期（天） |
 | `SEED_DEMO` | `true`（开发）/ `false`（生产） | 是否创建 alice / bob 演示账号 |
 | `COOKIE_SECURE` | `false` | 生产启用 HTTPS 后设为 `true` |
 | `SITE_ADDRESS` | `:80` | Caddy 站点地址；`:80` 为纯 HTTP，填 `https://<IP>` 或域名则启用 HTTPS |
@@ -399,6 +410,7 @@ uv run ruff format --check .
 已覆盖的验证：
 
 - 后端单测：注册/登录/登录态、频道创建与重名校验、消息发送/分页/删除权限、鉴权拦截、演示数据与欢迎消息、健康检查
+- 权限与成员：首个账号成为管理员、频道改删权限、管理员提升/取消角色、成员移除后立即失效与恢复、资料与密码修改
 - 双浏览器端到端：进入语音频道 → 双向音轨建立 → 静音状态同步 → Alice 共享屏幕（含系统声音）→ Bob 看到远端视频 → 停止后再次共享 → 离开语音 → 实时消息与输入中提示
 - 可靠性：停掉 API → 客户端显示重连中 → 离线期间写入消息 → API 恢复后 WebSocket 自动重连，并恰好补回一次消息
 - Caddy：生产 HTTP、HTTPS（内部 CA，支持局域网 IP + `default_sni`）、`wss://` 与开发环境 HMR 均实测通过
@@ -424,7 +436,7 @@ uv run ruff format --check .
 - P2P mesh 超过 ~5 人时上行带宽和 CPU 会明显上升；后续可切换 LiveKit / mediasoup SFU。
 - 不支持 HDR 端到端透传；HDR 屏幕会转成 SDR 发送。
 - 屏幕共享推荐桌面版 Chrome / Edge；移动端浏览器和 Safari 对 `getDisplayMedia` 的支持有限。
-- 暂无附件上传、消息编辑、表情回应、未读角标、私信、多工作区、权限角色与密码重置。
+- 暂无附件上传、消息编辑、表情回应、未读角标、私信、多工作区。
 - 语音房间状态保存在单个 API 进程内存中；多实例部署需要 Redis pub/sub。
 - 公网通话需要 TURN；没有 TURN 时部分网络环境下只能单向或无法建立连接。
 - 同一账号多标签页共享登录态；语音按用户维度加入，建议一个账号只在一个标签页里开麦。
