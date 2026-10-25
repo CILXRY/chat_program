@@ -1,0 +1,42 @@
+appId: com.nebula.chat
+productName: Nebula
+copyright: Copyright © 2026 CILXRY
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+  - from: build/tray.png
+    to: tray.png
+
+asar: true
+compression: normal
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-Setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Nebula
+  runAfterFinish: true
+
+publish:
+  provider: github
+  owner: CILXRY
+  repo: chat_program

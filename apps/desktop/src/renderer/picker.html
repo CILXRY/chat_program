@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>选择要共享的内容</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./picker.ts"></script>
+  </head>
+  <body class="picker-page">
+    <div class="picker-shell">
+      <header class="picker-header">
+        <div>
+          <h1>共享你的屏幕</h1>
+          <p>选择整个屏幕或某个窗口；共享开始后可以在客户端里随时停止。</p>
+        </div>
+        <button id="picker-close" class="picker-close" type="button" aria-label="取消共享" title="取消">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M18 6 6 18M6 6l12 12"></path>
+          </svg>
+        </button>
+      </header>
+
+      <div class="picker-toolbar">
+        <div class="picker-tabs" role="tablist" aria-label="共享源类型">
+          <button type="button" data-tab="screen" role="tab">屏幕 <span id="screen-count"></span></button>
+          <button type="button" data-tab="window" role="tab">窗口 <span id="window-count"></span></button>
+        </div>
+        <button id="refresh-sources" class="picker-refresh" type="button" title="刷新共享源">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+            <path d="M21 3v6h-6"></path>
+          </svg>
+          刷新
+        </button>
+      </div>
+
+      <p id="picker-error" class="picker-error" role="alert" hidden></p>
+
+      <div class="picker-scroll">
+        <div id="source-grid" class="source-grid" role="listbox" aria-label="共享源"></div>
+        <div id="source-loading" class="picker-empty">正在读取屏幕和窗口…</div>
+        <div id="source-empty" class="picker-empty" hidden>
+          <div>
+            <p>没有找到可共享的屏幕或窗口。</p>
+            <p>请检查 Windows 的屏幕录制权限，然后点「刷新」重试。</p>
+          </div>
+        </div>
+      </div>
+
+      <footer class="picker-footer">
+        <div>
+          <label class="audio-option">
+            <input id="share-audio" type="checkbox" checked />
+            共享系统音频
+          </label>
+          <p id="audio-hint" class="audio-hint">
+            Windows 系统声音会随整个屏幕一起发送；音频设备不支持时会自动降级为仅画面。
+          </p>
+        </div>
+        <div class="picker-actions">
+          <button id="cancel-picker" class="button subtle" type="button">取消</button>
+          <button id="confirm-picker" class="button primary" type="button" disabled>开始共享</button>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>

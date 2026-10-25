@@ -8,6 +8,10 @@ node_modules
 **/node_modules
 **/dist
 **/.astro
+apps/desktop/out
+apps/desktop/release
+docs
+.github
 apps/api/.venv
 **/__pycache__
 **/.pytest_cache

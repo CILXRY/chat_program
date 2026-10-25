@@ -1,3 +1,4 @@
+import { notifyDesktop } from './desktop';
 import { SdrScreenPipeline, isHdrDisplay, readForceSdr } from './screenCapture';
 import { useChatStore } from './store';
 import type { ServerEvent, VoiceParticipant } from './types';
@@ -47,6 +48,7 @@ class VoiceClient {
   private muted = false;
   private sharing = false;
   private joinToken = 0;
+  private announcedConnected = false;
   private iceServers = buildIceServers();
 
   constructor() {
@@ -95,6 +97,7 @@ class VoiceClient {
     this.selfId = me.id;
     this.muted = false;
     this.sharing = false;
+    this.announcedConnected = false;
     const token = ++this.joinToken;
     const store = useChatStore.getState();
 
@@ -156,10 +159,17 @@ class VoiceClient {
 
   handleSocketDown(): void {
     if (this.channelId === null) return;
+    const channel = useChatStore
+      .getState()
+      .channels.find((item) => item.id === this.channelId);
     this.joinToken += 1;
     this.teardown();
     useChatStore.getState().clearVoice();
     useChatStore.getState().showToast('实时连接已断开，已退出语音频道', 'error');
+    notifyDesktop(
+      '语音连接已断开',
+      channel ? `已退出 #${channel.name}` : '实时连接中断，已退出语音频道',
+    );
   }
 
   handleEvent(event: ServerEvent): void {
@@ -225,6 +235,7 @@ class VoiceClient {
     if (this.channelId === null) return;
 
     let rawStream: MediaStream | null = null;
+    let audioFallback = false;
     try {
       const options = {
         video: {
@@ -237,9 +248,25 @@ class VoiceClient {
         surfaceSwitching: 'include',
         monitorTypeSurfaces: 'include',
       };
-      rawStream = await navigator.mediaDevices.getDisplayMedia(
-        options as DisplayMediaStreamOptions,
-      );
+      try {
+        rawStream = await navigator.mediaDevices.getDisplayMedia(
+          options as DisplayMediaStreamOptions,
+        );
+      } catch (error) {
+        const errorName = (error as DOMException | undefined)?.name;
+        const desktop = window.nebulaDesktop;
+        if (errorName === 'NotReadableError' && desktop?.retryScreenShareWithoutAudio) {
+          audioFallback = true;
+          desktop.retryScreenShareWithoutAudio();
+          rawStream = await navigator.mediaDevices.getDisplayMedia({
+            ...options,
+            audio: false,
+            systemAudio: 'exclude',
+          } as DisplayMediaStreamOptions);
+        } else {
+          throw error;
+        }
+      }
 
       const rawVideoTrack = rawStream.getVideoTracks()[0];
       if (!rawVideoTrack) {
@@ -298,10 +325,17 @@ class VoiceClient {
         channel_id: this.channelId,
         sharing: true,
       });
-      useChatStore.getState().showToast(
-        toneMapped ? '屏幕共享已开始（HDR 已转换为 SDR）' : '屏幕共享已开始',
-        'info',
-      );
+      const notes: string[] = [];
+      if (toneMapped) notes.push('HDR 已转换为 SDR');
+      if (audioFallback) notes.push('系统声音不可用，仅共享画面');
+      useChatStore
+        .getState()
+        .showToast(
+          notes.length > 0
+            ? `屏幕共享已开始（${notes.join('；')}）`
+            : '屏幕共享已开始',
+          'info',
+        );
     } catch (error) {
       this.screenPipeline?.stop();
       this.screenPipeline = null;
@@ -388,6 +422,17 @@ class VoiceClient {
       status: 'connected',
       participants,
     });
+
+    if (!this.announcedConnected) {
+      this.announcedConnected = true;
+      const channel = useChatStore
+        .getState()
+        .channels.find((item) => item.id === channelId);
+      notifyDesktop(
+        '语音已连接',
+        channel ? `已加入 #${channel.name}` : '已加入语音频道',
+      );
+    }
   }
 
   private syncPeers(participants: VoiceParticipant[]): void {
@@ -650,6 +695,7 @@ class VoiceClient {
     this.selfId = null;
     this.muted = false;
     this.sharing = false;
+    this.announcedConnected = false;
   }
 }
 

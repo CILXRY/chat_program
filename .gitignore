@@ -5,6 +5,8 @@ node_modules/
 # builds
 dist/
 .astro/
+apps/desktop/out/
+apps/desktop/release/
 
 # python
 __pycache__/

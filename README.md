@@ -2,7 +2,7 @@
 
 一个自托管的 Discord 风格聊天空间：账号登录、多频道文字聊天、实时消息、语音通话和一键屏幕共享。
 
-技术栈：**Astro + React island + TypeScript + Tailwind CSS** · **FastAPI + SQLAlchemy + PostgreSQL** · **WebSocket + WebRTC** · **Docker Compose**。
+技术栈：**Astro + React island + TypeScript + Tailwind CSS** · **FastAPI + SQLAlchemy + PostgreSQL** · **WebSocket + WebRTC** · **Electron（Windows 客户端）** · **Docker Compose + Caddy**。
 
 | 文字频道 | 语音频道 |
 | --- | --- |
@@ -18,6 +18,7 @@
 - 语音频道：麦克风通话、静音、参与者状态
 - 屏幕共享：P2P mesh，支持同时共享画面与系统声音；HDR 屏幕会自动 tone map 到 SDR 以避免偏色
 - 响应式深色 UI，桌面端三栏布局，小屏抽屉式侧栏
+- Windows 桌面客户端：托盘、开机启动、全局快捷键、自定义屏幕源选择、自动更新
 - 一条命令启动 PostgreSQL + API；开发环境由 Vite 代理 `/api` 与 `/ws`，生产环境由 Caddy 统一入口
 
 > 语音与屏幕共享基于 P2P mesh，建议 **2–5 人**使用。需要跨公网稳定通话时请配置 TURN（见下文）。
@@ -140,14 +141,20 @@ Caddy 会通过 `host.docker.internal:4321` 代理到宿主机的 Astro 开发�
 │  │  │  └─ main.py
 │  │  ├─ alembic/             数据库迁移
 │  │  └─ tests/               pytest（SQLite 内存库）
-│  └─ web/                    Astro 前端
-│     └─ src/
-│        ├─ components/app/   App / ChatView / VoiceStage / Sidebar ...
-│        ├─ lib/              api / ws / store / rtc / screenCapture
-│        ├─ pages/            login / register / channels/[channelId]
-│        └─ middleware.ts     服务端鉴权与跳转
+│  ├─ web/                    Astro 前端
+│  │  └─ src/
+│  │     ├─ components/app/   App / ChatView / VoiceStage / Sidebar ...
+│  │     ├─ lib/              api / ws / store / rtc / screenCapture / desktop
+│  │     ├─ pages/            login / register / channels/[channelId]
+│  │     └─ middleware.ts     服务端鉴权与跳转
+│  └─ desktop/                Electron Windows 客户端
+│     ├─ src/main/            窗口 / 托盘 / 自启 / 快捷键 / 采集 / 更新
+│     ├─ src/preload/         受控 IPC bridge
+│     ├─ src/renderer/        设置 / 共享源选择器
+│     └─ electron-builder.yml NSIS 打包配置
 ├─ deploy/Caddyfile           生产反向代理（HTTP/HTTPS + WebSocket）
 ├─ deploy/Caddyfile.dev       开发环境可选 HTTPS 入口
+├─ .github/workflows/         Windows 安装包发布工作流
 ├─ docker-compose.yml         开发：db + api（+ 可选 caddy profile）
 ├─ docker-compose.prod.yml    生产：db + api + web + caddy
 └─ pnpm-workspace.yaml
@@ -275,11 +282,112 @@ docker compose -f docker-compose.prod.yml down
 
 ---
 
+## Windows 客户端（Electron）
+
+`apps/desktop` 是一个**薄客户端**：它加载你已经部署的 Web 应用，不包含 FastAPI / PostgreSQL，也不会自动启动 Docker。登录态按服务器地址隔离保存在 Electron session 中。
+
+### 功能
+
+- 远程服务器 / 本机地址两种模式，首次启动可测试连接
+- 自定义共享源选择器：屏幕与窗口缩略图、系统音频开关
+- 系统音频 loopback 失败时自动复用刚选的源降级为纯画面共享，并提示原因
+- 托盘菜单、关闭到托盘、开机启动、启动最小化
+- 全局快捷键（窗口隐藏时也可用），实际生效组合显示在设置里
+- 语音连接 / 他人开始共享屏幕的 Windows 通知（不做新消息通知）
+- HDR → SDR 共享管线
+- GitHub Releases 自动更新
+
+### 开发运行
+
+```powershell
+pnpm install
+pnpm desktop:dev
+```
+
+首次打开会进入服务器设置：
+
+- 使用本地开发服务器：`http://localhost:4321`
+- 使用生产 Docker 栈：`http://localhost:8080`
+- 远程部署：填写 `https://...`
+
+客户端不负责启动 Docker；本机模式只检查 `/api/health`。
+
+### 构建安装包
+
+```powershell
+pnpm --filter @nebula/desktop typecheck
+pnpm desktop:dist
+```
+
+输出：
+
+```text
+apps/desktop/release/Nebula-<version>-Setup.exe
+apps/desktop/release/win-unpacked/Nebula.exe   # 免安装快速验证
+```
+
+安装包未签名，Windows SmartScreen 会提示“未知发布者”；选择“仍要运行”即可。
+
+### 全局快捷键
+
+优先组合不可用时，客户端会自动尝试备选组合，设置页显示实际生效的组合：
+
+| 操作 | 优先 | 备选 |
+| --- | --- | --- |
+| 静音 / 取消静音 | `Ctrl+Shift+M` | `Ctrl+Alt+M`、`Ctrl+Shift+U` |
+| 显示 / 隐藏窗口 | `Ctrl+Shift+H` | `Ctrl+Alt+H` |
+| 离开语音 | `Ctrl+Shift+E` | `Ctrl+Alt+E` |
+
+如果三组静音快捷键都已被占用，设置里的状态点会变红。
+
+### 屏幕共享与系统音频
+
+- Windows 上使用 `audio: 'loopback'` 采集系统声音。
+- 某些声卡/驱动的音频增强会让 loopback 抛出 `NotReadableError`。此时客户端会复用刚才选择的源，自动改为纯画面共享，并在提示里标注“系统声音不可用”。
+- 想让系统声音恢复：在 Windows 声音设置里切换一次默认播放设备，或关闭当前扬声器的“音频增强”，然后重新共享。
+- 屏幕共享仍走现有的 HDR → SDR 转换；Electron 报告 HDR 显示时，界面会出现 `HDR → SDR` 标记。
+
+### 自动更新（GitHub Releases）
+
+- 更新源：`CILXRY/chat_program` 的 **Releases**（公开仓库）。
+- GitHub Actions 工作流：`.github/workflows/desktop-release.yml`。
+- 发布步骤：
+
+  ```powershell
+  # 1. 修改 apps/desktop/package.json 的 version，例如 0.1.1
+  # 2. 提交并推送
+  git push origin elegant
+  # 3. 打 tag 并推送（版本号保持一致）
+  git tag v0.1.1
+  git push origin v0.1.1
+  ```
+
+  Actions 会构建 `Nebula-0.1.1-Setup.exe`、`latest.yml` 并发布到 Releases；已安装的客户端会在启动后或每 6 小时检查更新。
+
+- 本地发布需要 `GH_TOKEN`：
+
+  ```powershell
+  $env:GH_TOKEN = "github_pat_..."
+  pnpm --filter @nebula/desktop dist:publish
+  ```
+
+- 未签名安装包仍可自动更新，但每次可能触发 SmartScreen。
+
+### 证书与本机 HTTPS
+
+- 自签名证书不会绕过：请把 Caddy / 服务器根证书安装到 Windows 受信任根证书。
+- 局域网用 HTTPS 时，把 `https://<IP>:9443` 这类地址填进远程模式；`localhost` 的本机开发地址可直接用 HTTP。
+- 非 `localhost` 的 `http://` 地址会禁用麦克风/屏幕共享，设置页会警告。
+
+---
+
 ## 开发与测试
 
 ```powershell
 pnpm check                          # Astro + TypeScript 检查
 pnpm build                          # 生产构建前端
+pnpm desktop:typecheck              # Electron / 本地设置页类型检查
+pnpm desktop:build                  # 构建 Electron 主进程、preload 和本地页面
 
 cd apps/api
 uv sync --all-groups
@@ -295,6 +403,8 @@ uv run ruff format --check .
 - 可靠性：停掉 API → 客户端显示重连中 → 离线期间写入消息 → API 恢复后 WebSocket 自动重连，并恰好补回一次消息
 - Caddy：生产 HTTP、HTTPS（内部 CA，支持局域网 IP + `default_sni`）、`wss://` 与开发环境 HMR 均实测通过
 - SDR 兼容管线：强制开启后远端收到转换后的视频，停止共享与再次共享均正常
+- Electron：打包后 exe 能启动、首次设置保存后进入主窗口；全局快捷键注册；自定义屏幕源选择器、SDR 屏幕捕获、系统音频失败自动降级、关闭到托盘均实测通过
+- 自动更新：已生成 `latest.yml` / GitHub Actions 发布工作流，需发布首个 tag 后验证真实升级链路
 
 ---
 
@@ -319,6 +429,8 @@ uv run ruff format --check .
 - 公网通话需要 TURN；没有 TURN 时部分网络环境下只能单向或无法建立连接。
 - 同一账号多标签页共享登录态；语音按用户维度加入，建议一个账号只在一个标签页里开麦。
 - 目前没有登录频率限制、审计日志或端到端加密聊天；更适合个人 / 小团队自托管，不建议直接暴露在公网大规模使用。
+- Windows 客户端首版仅支持 x64、不带代码签名、无新消息通知、不包含后端；发布自动更新需要公开的 GitHub 仓库。
+- Windows 系统音频 loopback 受声卡/驱动影响，个别设备会自动退化为纯画面共享。
 
 ---
 

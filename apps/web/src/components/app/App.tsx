@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { notifyDesktop, onDesktopShortcut } from '../../lib/desktop';
 import { voiceClient } from '../../lib/rtc';
 import { useChatStore } from '../../lib/store';
 import type {
@@ -39,6 +40,35 @@ async function ensureMessages(channelId: number): Promise<void> {
   } catch {
     useChatStore.getState().setMessageStatus(channelId, 'idle');
     useChatStore.getState().showToast('加载消息失败，请稍后再试', 'error');
+  }
+}
+
+type ChatState = ReturnType<typeof useChatStore.getState>;
+type VoiceStateEvent = Extract<ServerEvent, { type: 'voice.state' }>;
+
+function notifyShareChanges(state: ChatState, event: VoiceStateEvent): void {
+  if (state.voice.channelId !== event.channel_id) return;
+  if (state.voice.participants.length === 0) return;
+
+  const previous = new Map(
+    state.voice.participants.map((participant) => [
+      participant.user_id,
+      participant.sharing,
+    ]),
+  );
+  const channel = state.channels.find((item) => item.id === event.channel_id);
+
+  for (const participant of event.participants) {
+    if (participant.user_id === state.me?.id) continue;
+    const before = previous.get(participant.user_id);
+    if (before === undefined || before === participant.sharing) continue;
+
+    const user = state.users.find((item) => item.id === participant.user_id);
+    const name = user?.display_name ?? '有人';
+    notifyDesktop(
+      participant.sharing ? `${name} 开始共享屏幕` : `${name} 停止共享屏幕`,
+      channel ? `#${channel.name}` : 'Nebula 语音频道',
+    );
   }
 }
 
@@ -117,6 +147,9 @@ export default function App(props: Props) {
           store.upsertUser(event.user);
           break;
         case 'voice.state':
+          notifyShareChanges(store, event);
+          voiceClient.handleEvent(event);
+          break;
         case 'rtc.offer':
         case 'rtc.answer':
         case 'rtc.ice':
@@ -156,6 +189,16 @@ export default function App(props: Props) {
       voiceClient.dispose();
       useChatStore.getState().clearVoice();
     };
+  }, []);
+
+  useEffect(() => {
+    return onDesktopShortcut((action) => {
+      if (action === 'toggle-mute') {
+        void voiceClient.toggleMute();
+      } else if (action === 'leave-voice') {
+        voiceClient.leave();
+      }
+    });
   }, []);
 
   useEffect(() => {

@@ -9,6 +9,10 @@
   "scripts": {
     "dev": "pnpm --filter @nebula/web dev",
     "build": "pnpm --filter @nebula/web build",
-    "check": "pnpm --filter @nebula/web check"
+    "check": "pnpm --filter @nebula/web check",
+    "desktop:dev": "pnpm --filter @nebula/desktop dev",
+    "desktop:build": "pnpm --filter @nebula/desktop build",
+    "desktop:typecheck": "pnpm --filter @nebula/desktop typecheck",
+    "desktop:dist": "pnpm --filter @nebula/desktop dist"
   }
 }
