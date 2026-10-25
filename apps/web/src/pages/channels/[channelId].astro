@@ -1,0 +1,71 @@
+---
+import App from '../../components/app/App';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getChannels, getMessages, getUsers } from '../../lib/server/api';
+import type { Message } from '../../lib/types';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const channelId = Number(Astro.params.channelId);
+if (!Number.isInteger(channelId) || channelId <= 0) {
+  return Astro.redirect('/app');
+}
+
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const [channels, users] = await Promise.all([getChannels(cookie), getUsers(cookie)]);
+
+if (!channels || !users) {
+  return new Response('服务暂时不可用，请稍后刷新重试。', {
+    status: 503,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
+}
+
+const channel = channels.find((item) => item.id === channelId);
+if (!channel) {
+  return new Response('频道不存在。', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
+}
+
+let initialMessages: Message[] = [];
+let initialHasMore = false;
+if (channel.type === 'text') {
+  const page = await getMessages(cookie, channel.id);
+  if (page) {
+    initialMessages = page.items;
+    initialHasMore = page.has_more;
+  }
+}
+---
+
+<BaseLayout title={`#${channel.name} · Nebula`}>
+  <div class="relative h-dvh overflow-hidden">
+    <div
+      class="pointer-events-none absolute inset-0 grid place-items-center"
+      aria-hidden="true"
+    >
+      <div class="flex flex-col items-center gap-4 text-mist-500">
+        <div
+          class="h-9 w-9 animate-spin rounded-full border-2 border-base-700 border-t-accent-500"
+        >
+        </div>
+        <p class="text-sm">正在进入 Nebula…</p>
+      </div>
+    </div>
+
+    <App
+      client:only="react"
+      me={user}
+      initialChannels={channels}
+      initialUsers={users}
+      activeChannelId={channel.id}
+      initialMessages={initialMessages}
+      initialHasMore={initialHasMore}
+    />
+  </div>
+</BaseLayout>

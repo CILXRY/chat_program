@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.astro/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# env & local
+.env
+.env.local
+*.log
+caddy-root*.crt
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/

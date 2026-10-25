@@ -1,0 +1,25 @@
+---
+import { getChannels } from '../lib/server/api';
+
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const channels = await getChannels(cookie);
+
+if (!channels) {
+  return new Response('服务暂时不可用，请稍后刷新重试。', {
+    status: 503,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
+}
+
+if (channels.length === 0) {
+  return new Response('还没有任何频道，请先创建频道。', {
+    status: 503,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
+}
+
+const first =
+  channels.find((channel) => channel.type === 'text') ?? channels[0];
+
+return Astro.redirect(`/channels/${first.id}`);
+---

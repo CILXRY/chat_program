@@ -1,0 +1,42 @@
+[project]
+name = "nebula-api"
+version = "0.1.0"
+description = "Nebula chat API — FastAPI, WebSockets and WebRTC signaling"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "alembic>=1.16",
+  "asyncpg>=0.30",
+  "bcrypt>=5.0",
+  "fastapi>=0.116",
+  "pydantic-settings>=2.10",
+  "pyjwt>=2.10",
+  "sqlalchemy[asyncio]>=2.0.40",
+  "uvicorn[standard]>=0.35",
+]
+
+[dependency-groups]
+dev = [
+  "aiosqlite>=0.21",
+  "httpx>=0.28",
+  "pytest>=8.4",
+  "pytest-asyncio>=1.1",
+  "ruff>=0.12",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# FastAPI's dependency injection idiom uses function calls in defaults.
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*" = ["E501", "I001"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

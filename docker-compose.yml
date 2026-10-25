@@ -1,0 +1,68 @@
+name: nebula-chat
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nebula}
+      POSTGRES_USER: ${POSTGRES_USER:-nebula}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nebula_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-nebula} -d ${POSTGRES_DB:-nebula}",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nebula}:${POSTGRES_PASSWORD:-nebula_dev_password}@db:5432/${POSTGRES_DB:-nebula}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-before-deploying}
+      JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      CORS_ORIGINS: http://localhost:4321
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Optional HTTPS entry for the host-run Astro dev server.
+  # Start with: docker compose --profile https up -d
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${DEV_SITE_ADDRESS:-https://localhost}
+      DEFAULT_SNI: ${DEV_DEFAULT_SNI:-localhost}
+    ports:
+      - "${DEV_HTTPS_PORT:-9443}:443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./deploy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:

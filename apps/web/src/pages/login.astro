@@ -1,0 +1,21 @@
+---
+import AuthForm from '../components/auth/AuthForm';
+import AuthLayout from '../layouts/AuthLayout.astro';
+
+const rawNext = Astro.url.searchParams.get('next') ?? '';
+const next =
+  rawNext.startsWith('/') &&
+  !rawNext.startsWith('//') &&
+  !rawNext.startsWith('/login') &&
+  !rawNext.startsWith('/register')
+    ? rawNext
+    : '';
+---
+
+<AuthLayout
+  mode="login"
+  title="欢迎回来"
+  subtitle="登录后继续你的频道和对话。"
+>
+  <AuthForm mode="login" next={next} client:load />
+</AuthLayout>

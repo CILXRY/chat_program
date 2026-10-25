@@ -1,0 +1,21 @@
+---
+import AuthForm from '../components/auth/AuthForm';
+import AuthLayout from '../layouts/AuthLayout.astro';
+
+const rawNext = Astro.url.searchParams.get('next') ?? '';
+const next =
+  rawNext.startsWith('/') &&
+  !rawNext.startsWith('//') &&
+  !rawNext.startsWith('/login') &&
+  !rawNext.startsWith('/register')
+    ? rawNext
+    : '';
+---
+
+<AuthLayout
+  mode="register"
+  title="创建你的账号"
+  subtitle="只需要一个用户名和密码，就可以加入这个空间。"
+>
+  <AuthForm mode="register" next={next} client:load />
+</AuthLayout>

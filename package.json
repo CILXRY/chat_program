@@ -1,0 +1,14 @@
+{
+  "name": "nebula-chat",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @nebula/web dev",
+    "build": "pnpm --filter @nebula/web build",
+    "check": "pnpm --filter @nebula/web check"
+  }
+}

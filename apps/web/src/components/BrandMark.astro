@@ -1,0 +1,28 @@
+---
+interface Props {
+  size?: number;
+}
+
+const { size = 40 } = Astro.props;
+---
+
+<span
+  class="relative grid place-items-center rounded-2xl bg-gradient-to-br from-accent-500 via-accent-600 to-[#3b2f9e] shadow-[0_10px_30px_-10px_rgba(139,124,255,0.7)]"
+  style={`width:${size}px;height:${size}px`}
+  aria-hidden="true"
+>
+  <svg
+    width={size * 0.6}
+    height={size * 0.6}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="white"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <circle cx="12" cy="12" r="3.2" fill="white" stroke="none"></circle>
+    <ellipse cx="12" cy="12" rx="9.5" ry="4.2" transform="rotate(-28 12 12)" opacity="0.9"></ellipse>
+    <circle cx="19" cy="6.6" r="1.15" fill="white" stroke="none"></circle>
+  </svg>
+</span>

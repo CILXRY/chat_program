@@ -1,0 +1,11 @@
+{
+	admin off
+	default_sni {$DEFAULT_SNI:localhost}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# The Astro dev server proxies /api and /ws onward to FastAPI.
+	reverse_proxy host.docker.internal:4321
+}

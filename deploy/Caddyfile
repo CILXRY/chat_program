@@ -1,0 +1,22 @@
+{
+	admin off
+	# Required when the site is reached by a bare IP address, because clients
+	# do not send SNI for IP literals. Set DEFAULT_SNI to that IP.
+	default_sni {$DEFAULT_SNI:localhost}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle /ws {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:4321
+	}
+}

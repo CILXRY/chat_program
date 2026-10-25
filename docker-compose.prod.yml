@@ -1,0 +1,90 @@
+name: nebula-chat-prod
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nebula}
+      POSTGRES_USER: ${POSTGRES_USER:-nebula}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nebula_dev_password}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-nebula} -d ${POSTGRES_DB:-nebula}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nebula}:${POSTGRES_PASSWORD:-nebula_dev_password}@db:5432/${POSTGRES_DB:-nebula}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env before starting the production stack}
+      JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        PUBLIC_STUN_URL: ${PUBLIC_STUN_URL:-stun:stun.l.google.com:19302}
+        PUBLIC_TURN_URL: ${PUBLIC_TURN_URL:-}
+        PUBLIC_TURN_USERNAME: ${PUBLIC_TURN_USERNAME:-}
+        PUBLIC_TURN_CREDENTIAL: ${PUBLIC_TURN_CREDENTIAL:-}
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      # :80        → plain HTTP (default)
+      # localhost  → HTTPS with Caddy's internal CA
+      # example.com → HTTPS with automatic public TLS
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      # Must match SITE_ADDRESS's host when accessing via a bare LAN IP.
+      DEFAULT_SNI: ${DEFAULT_SNI:-localhost}
+    ports:
+      - "${CADDY_HTTP_PORT:-8080}:80"
+      - "${CADDY_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:

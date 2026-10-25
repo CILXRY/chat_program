@@ -1,0 +1,100 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import BrandMark from '../components/BrandMark.astro';
+
+interface Props {
+  title: string;
+  subtitle: string;
+  mode: 'login' | 'register';
+}
+
+const { title, subtitle, mode } = Astro.props;
+---
+
+<BaseLayout title={`${mode === 'login' ? '登录' : '注册'} · Nebula`}>
+  <div class="relative min-h-dvh overflow-hidden bg-base-950">
+    <div class="grid-fade absolute inset-0"></div>
+    <div class="aurora aurora-a"></div>
+    <div class="aurora aurora-b"></div>
+
+    <div
+      class="relative mx-auto grid min-h-dvh w-full max-w-6xl grid-cols-1 gap-10 px-5 py-8 lg:grid-cols-[1.05fr_0.95fr] lg:px-10"
+    >
+      <aside class="hidden flex-col justify-between py-6 lg:flex">
+        <a href="/" class="inline-flex w-fit items-center gap-3">
+          <BrandMark />
+          <span class="text-lg font-semibold tracking-tight">Nebula</span>
+        </a>
+
+        <div class="max-w-lg">
+          <div
+            class="mb-6 inline-flex items-center gap-2 rounded-full border border-accent-500/25 bg-accent-500/10 px-3 py-1.5 text-xs font-medium text-accent-300"
+          >
+            <span class="h-1.5 w-1.5 rounded-full bg-mint-400"></span>
+            自托管 · 实时 · P2P 媒体
+          </div>
+          <h2 class="text-balance text-4xl font-semibold leading-tight tracking-tight xl:text-5xl">
+            聊天不必喧闹，<br />
+            <span
+              class="bg-gradient-to-r from-accent-300 via-accent-400 to-mint-400 bg-clip-text text-transparent"
+            >
+              但一定要在场。
+            </span>
+          </h2>
+          <p class="mt-5 max-w-md text-[15px] leading-7 text-mist-400">
+            Nebula 是一个属于你的小空间：文字频道保持同步，语音频道随时开麦，
+            需要时一键共享屏幕。数据留在你自己的服务器上。
+          </p>
+
+          <ul class="mt-9 grid gap-3 text-sm text-mist-300">
+            <li class="flex items-center gap-3">
+              <span class="grid h-8 w-8 place-items-center rounded-lg bg-base-800 text-accent-300">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </span>
+              消息实时送达，重连后自动补齐
+            </li>
+            <li class="flex items-center gap-3">
+              <span class="grid h-8 w-8 place-items-center rounded-lg bg-base-800 text-mint-400">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+              </span>
+              语音频道，低延迟的 WebRTC 通话
+            </li>
+            <li class="flex items-center gap-3">
+              <span class="grid h-8 w-8 place-items-center rounded-lg bg-base-800 text-warn-400">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+              </span>
+              一键共享屏幕，最多 5 人 P2P 直连
+            </li>
+          </ul>
+        </div>
+
+        <p class="text-xs text-mist-600">
+          Nebula · 自托管聊天空间 · FastAPI + Astro + WebRTC
+        </p>
+      </aside>
+
+      <main class="flex items-center justify-center">
+        <div class="w-full max-w-[420px]">
+          <a href="/" class="mb-8 inline-flex items-center gap-3 lg:hidden">
+            <BrandMark />
+            <span class="text-lg font-semibold tracking-tight">Nebula</span>
+          </a>
+
+          <div
+            class="animate-pop rounded-3xl border border-white/[0.06] bg-base-900/85 p-6 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)] backdrop-blur-xl sm:p-8"
+          >
+            <h1 class="text-2xl font-semibold tracking-tight">{title}</h1>
+            <p class="mt-2 text-sm leading-6 text-mist-500">{subtitle}</p>
+            <div class="mt-7">
+              <slot />
+            </div>
+          </div>
+
+          <p class="mt-6 text-center text-xs text-mist-600">
+            继续即表示你同意在这个小空间里保持友善。
+          </p>
+        </div>
+      </main>
+    </div>
+  </div>
+</BaseLayout>
