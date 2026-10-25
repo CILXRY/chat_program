@@ -43,6 +43,12 @@ async def ensure_defaults(db: AsyncSession) -> None:
 
 
 async def seed_demo(db: AsyncSession) -> None:
+    has_admin = (
+        await db.scalar(
+            select(User.id).where(User.role == "admin", User.is_active.is_(True)).limit(1)
+        )
+        is not None
+    )
     created = []
     for data in DEMO_USERS:
         existing = await db.scalar(select(User).where(User.username == data["username"]))
@@ -53,7 +59,10 @@ async def seed_demo(db: AsyncSession) -> None:
             display_name=data["display_name"],
             password_hash=hash_password(data["password"]),
             avatar_color=pick_avatar_color(data["username"]),
+            role="member" if has_admin else "admin",
         )
+        if not has_admin:
+            has_admin = True
         db.add(user)
         created.append(data["username"])
     if not created:

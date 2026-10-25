@@ -82,6 +82,33 @@ class Hub:
         for websocket in list(self.connections.get(uid, ())):
             await self._send(websocket, payload)
 
+    async def disconnect_user(self, uid: int) -> None:
+        """Force a user offline (used when a member is removed)."""
+        connections = self.connections.pop(uid, None)
+        await self.voice_leave(uid)
+        self.user_info.pop(uid, None)
+        for channel_id in list(self.channel_subs):
+            subscribers = self.channel_subs[channel_id]
+            subscribers.discard(uid)
+            if not subscribers:
+                self.channel_subs.pop(channel_id, None)
+
+        for websocket in list(connections or ()):
+            try:
+                await websocket.close(code=4401)
+            except Exception:
+                logger.debug("failed to close websocket for removed user", exc_info=True)
+
+        await self.broadcast_all({"type": "presence.update", "user_id": uid, "online": False})
+
+    async def close_voice_room(self, channel_id: int) -> None:
+        """Drop the in-memory voice room when its channel is deleted."""
+        room = self.voice_rooms.pop(channel_id, None)
+        if not room:
+            return
+        for uid in room:
+            self.voice_of.pop(uid, None)
+
     async def broadcast_all(self, payload: dict, exclude_ws: WebSocket | None = None) -> None:
         for connections in list(self.connections.values()):
             for websocket in list(connections):

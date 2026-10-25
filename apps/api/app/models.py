@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, MetaData, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, MetaData, String, Text, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 NAMING_CONVENTION = {
@@ -24,6 +24,13 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(40))
     password_hash: Mapped[str] = mapped_column(String(255))
     avatar_color: Mapped[str] = mapped_column(String(7))
+    role: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="member", server_default="member"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -39,6 +46,9 @@ class Channel(Base):
     type: Mapped[str] = mapped_column(String(10), nullable=False, default="text")
     topic: Mapped[str | None] = mapped_column(String(160), nullable=True)
     position: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
