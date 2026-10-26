@@ -11,7 +11,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -25,14 +25,32 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/desktop/src-tauri -> target"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Ensure Electron binary
-        run: pnpm --filter @nebula/desktop run postinstall
-
       - name: Build and publish installer
-        run: pnpm --filter @nebula/desktop dist:publish
+        uses: tauri-apps/tauri-action@v0
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          tagName: v__VERSION__
+          releaseName: "Nebula v__VERSION__"
+          releaseBody: |
+            Windows 客户端（Tauri / WebView2）。
+
+            - 原生 WGC/DXGI 屏幕采集与 HDR → SDR ACES tone mapping
+            - 耳机感知 AEC、VAD 静音门、RNNoise / DeepFilterNet3 / Hush 降噪
+            - 自适应 AGC、Opus DTX
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis

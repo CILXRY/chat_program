@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/copy-audio-assets.mjs",
+    "predev": "node scripts/copy-audio-assets.mjs",
     "dev": "astro dev --host 0.0.0.0",
+    "prebuild": "node scripts/copy-audio-assets.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
@@ -13,6 +16,7 @@
   "dependencies": {
     "@astrojs/node": "^11.1.9",
     "@astrojs/react": "^7.1.1",
+    "@cc-livekit/audio-pipeline-plugin": "^1.1.17",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.4.2",
     "lucide-react": "^1.61.0",
@@ -26,6 +30,7 @@
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "livekit-client": "^2.8.1",
     "typescript": "^6.0.0"
   }
 }

@@ -1,29 +1,24 @@
 {
   "name": "@nebula/desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Nebula Windows desktop client",
+  "description": "Nebula Windows desktop client (Tauri)",
   "author": {
     "name": "CILXRY"
   },
   "license": "MIT",
-  "main": "./out/main/index.js",
+  "type": "module",
   "scripts": {
-    "postinstall": "install-electron",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "tauri dev",
+    "build": "tauri build",
     "typecheck": "tsc --noEmit",
-    "dist": "electron-vite build && electron-builder --win nsis --publish never",
-    "dist:publish": "electron-vite build && electron-builder --win nsis --publish always"
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.11"
+    "ui:dev": "vite --config vite.config.ts",
+    "ui:build": "vite build --config vite.config.ts",
+    "tauri": "tauri"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0",
     "@types/node": "^26.6.5",
-    "electron": "^45.0.0",
-    "electron-builder": "^26.18.0",
-    "electron-vite": "^6.0.0",
     "typescript": "^6.0.0",
     "vite": "^8.3.5"
   }

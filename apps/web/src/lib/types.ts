@@ -69,6 +69,8 @@ export interface VoiceState {
   remoteStreams: Record<number, MediaStream>;
   localScreen: MediaStream | null;
   localAudio: MediaStream | null;
+  screenHdr: boolean;
+  screenNative: boolean;
 }
 
 export type ServerEvent =

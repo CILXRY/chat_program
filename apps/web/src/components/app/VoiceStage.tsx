@@ -1,4 +1,6 @@
 import {
+  AppWindow,
+  AudioLines,
   LoaderCircle,
   Maximize2,
   Menu,
@@ -23,6 +25,7 @@ import {
 } from '../../lib/screenCapture';
 import { useChatStore } from '../../lib/store';
 import type { Channel, VoiceParticipant } from '../../lib/types';
+import AudioSettingsPanel from './AudioSettingsPanel';
 import Avatar from './Avatar';
 import ChannelSettingsModal from './ChannelSettingsModal';
 
@@ -36,10 +39,12 @@ function StreamVideo({
   stream,
   muted = false,
   className = '',
+  onFps,
 }: {
   stream: MediaStream | null;
   muted?: boolean;
   className?: string;
+  onFps?: (fps: number) => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
 
@@ -52,7 +57,31 @@ function StreamVideo({
     if (stream) {
       void video.play().catch(() => undefined);
     }
-  }, [stream]);
+
+    if (!onFps || !stream || !('requestVideoFrameCallback' in video)) {
+      return;
+    }
+    let stopped = false;
+    let frames = 0;
+    let windowStarted = performance.now();
+    let callback = 0;
+    const tick = () => {
+      if (stopped) return;
+      frames += 1;
+      const now = performance.now();
+      if (now - windowStarted >= 1000) {
+        onFps((frames * 1000) / (now - windowStarted));
+        frames = 0;
+        windowStarted = now;
+      }
+      callback = video.requestVideoFrameCallback(tick);
+    };
+    callback = video.requestVideoFrameCallback(tick);
+    return () => {
+      stopped = true;
+      if (callback) video.cancelVideoFrameCallback(callback);
+    };
+  }, [stream, onFps]);
 
   return <video ref={ref} autoPlay playsInline muted={muted} className={className} />;
 }
@@ -67,6 +96,7 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
   const [forceSdr, setForceSdr] = useState(() => readForceSdr());
   const [hdrDisplay, setHdrDisplay] = useState(() => isHdrDisplay());
   const [editingChannel, setEditingChannel] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
 
   const inThisChannel = voice.channelId === channel.id;
   const isConnecting = inThisChannel && voice.status === 'connecting';
@@ -208,6 +238,10 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
                 屏幕共享
               </span>
               <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-base-850 px-2.5 py-1">
+                <AudioLines size={12} />
+                AEC / VAD / AGC
+              </span>
+              <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-base-850 px-2.5 py-1">
                 <ShieldCheck size={12} />
                 P2P 直连
               </span>
@@ -232,7 +266,7 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
               )}
             </button>
             <p className="mt-3 text-[11px] text-mist-600">
-              加入后浏览器会请求麦克风权限
+              加入后客户端会请求麦克风权限
             </p>
           </div>
         </div>
@@ -306,7 +340,12 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
                 </p>
                 <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-mist-400">
                   #{channel.name}
-                  {hdrDisplay && (
+                  {voice.screenNative && (
+                    <span className="rounded-full border border-accent-500/25 bg-accent-500/10 px-1.5 py-0.5 text-[9px] font-medium text-accent-300">
+                      WGC 原生采集
+                    </span>
+                  )}
+                  {(voice.screenHdr || hdrDisplay) && (
                     <span className="rounded-full border border-warn-400/20 bg-warn-400/10 px-1.5 py-0.5 text-[9px] font-medium text-warn-400">
                       HDR → SDR
                     </span>
@@ -314,7 +353,22 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="relative flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setAudioOpen((value) => !value)}
+                  aria-pressed={audioOpen}
+                  className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-medium transition ${
+                    audioOpen
+                      ? 'border-mint-400/30 bg-mint-400/10 text-mint-300'
+                      : 'border-white/[0.07] bg-base-850 text-mist-300 hover:bg-base-800 hover:text-white'
+                  }`}
+                  title="音频处理：AEC / VAD / 降噪 / AGC"
+                >
+                  <AudioLines size={16} />
+                  <span className="hidden sm:inline">音频</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => void voiceClient.toggleMute()}
@@ -333,19 +387,31 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
 
                 <button
                   type="button"
-                  onClick={() => void voiceClient.toggleShare()}
+                  onClick={() => void voiceClient.toggleShare('screen')}
                   className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-medium transition ${
                     voice.sharing
                       ? 'border-accent-500/30 bg-accent-500/15 text-accent-300 hover:bg-accent-500/20'
                       : 'border-white/[0.07] bg-base-850 text-mist-300 hover:bg-base-800 hover:text-white'
                   }`}
-                  title={voice.sharing ? '停止共享' : '共享屏幕'}
+                  title={voice.sharing ? '停止共享' : '共享整个屏幕'}
                 >
                   {voice.sharing ? <ScreenShareOff size={16} /> : <ScreenShare size={16} />}
                   <span className="hidden sm:inline">
                     {voice.sharing ? '停止共享' : '共享屏幕'}
                   </span>
                 </button>
+
+                {!voice.sharing && (
+                  <button
+                    type="button"
+                    onClick={() => void voiceClient.toggleShare('window')}
+                    className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.07] bg-base-850 px-3 text-xs font-medium text-mist-300 transition hover:bg-base-800 hover:text-white"
+                    title="选择窗口或屏幕（系统选择器）"
+                  >
+                    <AppWindow size={16} />
+                    <span className="hidden sm:inline">选择源</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -358,7 +424,7 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
                   }`}
                   title={
                     hdrDisplay
-                      ? '检测到 HDR 显示器：屏幕共享会自动转为 SDR；开启此项可强制所有共享转换（下次共享生效）'
+                      ? '检测到 HDR 显示器：原生 WGC 采集会自动用 16F → ACES → SDR；开启此项可强制所有共享走 tone mapping（下次共享生效）'
                       : '屏幕颜色异常时开启：强制把共享画面转为 SDR（下次共享生效）'
                   }
                 >
@@ -375,6 +441,13 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
                   <PhoneOff size={16} />
                   <span className="hidden sm:inline">离开</span>
                 </button>
+
+                {audioOpen && (
+                  <AudioSettingsPanel
+                    active={inThisChannel}
+                    onClose={() => setAudioOpen(false)}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -459,6 +532,7 @@ function ParticipantTile({
   onExpand: () => void;
 }) {
   const sharing = participant.sharing;
+  const [fps, setFps] = useState(0);
 
   return (
     <div
@@ -472,6 +546,7 @@ function ParticipantTile({
             stream={stream}
             muted={isSelf}
             className="h-full w-full bg-black object-contain"
+            onFps={isSelf ? setFps : undefined}
           />
           <button
             type="button"
@@ -485,6 +560,9 @@ function ParticipantTile({
           <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-[9px] font-medium text-accent-300 backdrop-blur">
             <ScreenShare size={10} />
             正在共享
+            {isSelf && fps > 0 && (
+              <span className="text-mist-300">· {Math.round(fps)} fps</span>
+            )}
           </span>
         </>
       ) : (
