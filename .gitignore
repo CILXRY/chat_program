@@ -5,8 +5,11 @@ node_modules/
 # builds
 dist/
 .astro/
-apps/desktop/out/
-apps/desktop/release/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/dist-ui/
+# generated audio models / worklets (copied by `pnpm install` / `prebuild`)
+apps/web/public/audio/
 
 # python
 __pycache__/

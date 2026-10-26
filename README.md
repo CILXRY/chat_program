@@ -2,7 +2,7 @@
 
 一个自托管的 Discord 风格聊天空间：账号登录、多频道文字聊天、实时消息、语音通话和一键屏幕共享。
 
-技术栈：**Astro + React island + TypeScript + Tailwind CSS** · **FastAPI + SQLAlchemy + PostgreSQL** · **WebSocket + WebRTC** · **Electron（Windows 客户端）** · **Docker Compose + Caddy**。
+技术栈：**Astro + React island + TypeScript + Tailwind CSS** · **FastAPI + SQLAlchemy + PostgreSQL** · **WebSocket + WebRTC** · **Tauri 2 + Rust（Windows 客户端）** · **Docker Compose + Caddy**。
 
 | 文字频道 | 语音频道 |
 | --- | --- |
@@ -18,9 +18,10 @@
 - 个人设置：显示名称、头像颜色、修改密码；通知与消息密度偏好保存在本地
 - WebSocket 实时消息、在线状态、输入中提示、断线重连补消息
 - 语音频道：麦克风通话、静音、参与者状态
-- 屏幕共享：P2P mesh，支持同时共享画面与系统声音；HDR 屏幕会自动 tone map 到 SDR 以避免偏色
+- 音频管线：耳机感知 AEC（检测到耳机自动减弱）、VAD 静音门 + Opus DTX、RNNoise / DeepFilterNet3 / Hush 预设降噪、AGC 自适应音量
+- 屏幕共享：P2P mesh，支持同时共享画面与系统声音；桌面端使用原生 WGC 采集与 WASAPI loopback，HDR FP16 画面经 ACES tone mapping 转为 SDR
 - 响应式深色 UI，桌面端三栏布局，小屏抽屉式侧栏
-- Windows 桌面客户端：托盘、开机启动、全局快捷键、自定义屏幕源选择、自动更新；账号设置与网页端共用
+- Windows 桌面客户端（Tauri 2）：托盘、开机启动、全局快捷键、WGC/DXGI 原生采集、自定义音频处理、自动更新；账号设置与网页端共用
 - 一条命令启动 PostgreSQL + API；开发环境由 Vite 代理 `/api` 与 `/ws`，生产环境由 Caddy 统一入口
 
 > 语音与屏幕共享基于 P2P mesh，建议 **2–5 人**使用。需要跨公网稳定通话时请配置 TURN（见下文）。
@@ -157,11 +158,11 @@ Caddy 会通过 `host.docker.internal:4321` 代理到宿主机的 Astro 开发�
 │  │     ├─ lib/              api / ws / store / rtc / screenCapture / prefs / desktop
 │  │     ├─ pages/            login / register / channels/[channelId]
 │  │     └─ middleware.ts     服务端鉴权与跳转
-│  └─ desktop/                Electron Windows 客户端
-│     ├─ src/main/            窗口 / 托盘 / 自启 / 快捷键 / 采集 / 更新
-│     ├─ src/preload/         受控 IPC bridge
-│     ├─ src/renderer/        设置 / 共享源选择器
-│     └─ electron-builder.yml NSIS 打包配置
+│  └─ desktop/                Tauri 2 Windows 客户端
+│     ├─ src-tauri/           Rust：窗口 / 托盘 / 自启 / 快捷键 / WGC 采集 / 更新
+│     │  └─ src/capture/      WGC/DXGI 视频 + WASAPI loopback + HDR tone mapping
+│     ├─ ui/                  本地设置页（Vite）
+│     └─ src-tauri/tauri.conf.json  NSIS 打包配置
 ├─ deploy/Caddyfile           生产反向代理（HTTP/HTTPS + WebSocket）
 ├─ deploy/Caddyfile.dev       开发环境可选 HTTPS 入口
 ├─ .github/workflows/         Windows 安装包发布工作流
@@ -293,22 +294,25 @@ docker compose -f docker-compose.prod.yml down
 
 ---
 
-## Windows 客户端（Electron）
+## Windows 客户端（Tauri 2）
 
-`apps/desktop` 是一个**薄客户端**：它加载你已经部署的 Web 应用，不包含 FastAPI / PostgreSQL，也不会自动启动 Docker。登录态按服务器地址隔离保存在 Electron session 中。
+`apps/desktop` 是一个**薄客户端**：Rust 侧负责窗口、托盘、快捷键、自动更新和原生媒体采集，WebView2 加载你已经部署的 Web 应用。它不包含 FastAPI / PostgreSQL，也不会自动启动 Docker。每个服务器地址使用独立的 WebView2 数据目录，登录态互不串联。
 
 ### 功能
 
 - 远程服务器 / 本机地址两种模式，首次启动可测试连接
-- 自定义共享源选择器：屏幕与窗口缩略图、系统音频开关
-- 系统音频 loopback 失败时自动复用刚选的源降级为纯画面共享，并提示原因
+- **WGC/DXGI 原生屏幕采集**：直接打开 Windows 系统选择器，不再使用浏览器的 `getDisplayMedia` 窗口录制
+- **WASAPI loopback 系统声音**：48 kHz 立体声 PCM 走本机 loopback WebSocket，随屏幕画面一起发布
+- **HDR FP16 → SDR**：WGC 以 scRGB FP16 采集，Rust 侧做 ACES tone mapping、sRGB 编码、按设置画质等比缩放（默认 900p），再转换成 BT.709 I420 帧交给 WebCodecs
+- **音频管线**：耳机感知 AEC、VAD 静音门 + Opus DTX、RNNoise / DeepFilterNet3 / Hush 预设、AGC
 - 托盘菜单、关闭到托盘、开机启动、启动最小化
 - 全局快捷键（窗口隐藏时也可用），实际生效组合显示在设置里
 - 语音连接 / 他人开始共享屏幕的 Windows 通知（不做新消息通知）
-- HDR → SDR 共享管线
 - GitHub Releases 自动更新
 
 ### 开发运行
+
+前置条件：Node.js ≥ 22、pnpm、Rust stable（MSVC 工具链）以及 Visual Studio Build Tools 的「使用 C++ 的桌面开发」。
 
 ```powershell
 pnpm install
@@ -321,20 +325,20 @@ pnpm desktop:dev
 - 使用生产 Docker 栈：`http://localhost:8080`
 - 远程部署：填写 `https://...`
 
-客户端不负责启动 Docker；本机模式只检查 `/api/health`。
+客户端不负责启动 Docker；本机模式只检查 `/api/health`。Tauri 开发模式会先构建本地设置页，再启动 Vite；主窗口仍然从服务器加载 Web 应用。
 
 ### 构建安装包
 
 ```powershell
 pnpm --filter @nebula/desktop typecheck
-pnpm desktop:dist
+pnpm desktop:build
 ```
 
 输出：
 
 ```text
-apps/desktop/release/Nebula-<version>-Setup.exe
-apps/desktop/release/win-unpacked/Nebula.exe   # 免安装快速验证
+apps/desktop/src-tauri/target/release/bundle/nsis/Nebula_<version>_x64-setup.exe
+apps/desktop/src-tauri/target/release/nebula-desktop.exe   # 免安装快速验证
 ```
 
 安装包未签名，Windows SmartScreen 会提示“未知发布者”；选择“仍要运行”即可。
@@ -351,36 +355,31 @@ apps/desktop/release/win-unpacked/Nebula.exe   # 免安装快速验证
 
 如果三组静音快捷键都已被占用，设置里的状态点会变红。
 
-### 屏幕共享与系统音频
+### 屏幕共享、系统音频与 HDR
 
-- Windows 上使用 `audio: 'loopback'` 采集系统声音。
-- 某些声卡/驱动的音频增强会让 loopback 抛出 `NotReadableError`。此时客户端会复用刚才选择的源，自动改为纯画面共享，并在提示里标注“系统声音不可用”。
-- 想让系统声音恢复：在 Windows 声音设置里切换一次默认播放设备，或关闭当前扬声器的“音频增强”，然后重新共享。
-- 屏幕共享仍走现有的 HDR → SDR 转换；Electron 报告 HDR 显示时，界面会出现 `HDR → SDR` 标记。
+- 点击「共享屏幕」后由 Rust 调用 `Windows.Graphics.Capture` 的系统选择器；窗口被关闭时采集自动结束。
+- 画面通过 `127.0.0.1` 上的一次性 WebSocket 送到 WebView：首帧是元数据，之后是带时间戳的 I420 帧；Web 侧优先使用 `MediaStreamTrackGenerator`，不可用时退回 canvas 轨道。屏幕内容由 WebRTC 自己的编码器负责压缩，避免在 Rust 侧做软件 JPEG。
+- 系统声音使用 WASAPI 默认输出设备的 loopback 采集，事件驱动失败时自动退回轮询；没有可用输出设备时仍可共享画面。
+- 当前 WebRTC 编码链路按 SDR 发送。HDR 屏幕会走 FP16 + ACES；普通 SDR 屏幕直接采集 BGRA8。
+- 屏幕共享画质在「设置 → 偏好 → 屏幕共享画质」里选择 `720p / 900p / 1080p`；默认 900p，兼顾文字清晰度和 30fps。本地预览左上角会显示实测 fps，方便确认当前机器是否有余量。
+- 「SDR 兼容」开关在桌面端表示强制走 FP16 tone mapping（例如自动检测不准时），下次共享生效。
 
 ### 自动更新（GitHub Releases）
 
 - 更新源：`CILXRY/chat_program` 的 **Releases**（公开仓库）。
-- GitHub Actions 工作流：`.github/workflows/desktop-release.yml`。
+- GitHub Actions 工作流：`.github/workflows/desktop-release.yml`，使用 `tauri-apps/tauri-action` 构建 NSIS 安装包。
 - 发布步骤：
 
   ```powershell
-  # 1. 修改 apps/desktop/package.json 的 version，例如 0.1.1
+  # 1. 修改 apps/desktop/package.json 与 src-tauri/tauri.conf.json 的 version
   # 2. 提交并推送
   git push origin elegant
   # 3. 打 tag 并推送（版本号保持一致）
-  git tag v0.1.1
-  git push origin v0.1.1
+  git tag v0.3.0
+  git push origin v0.3.0
   ```
 
-  Actions 会构建 `Nebula-0.1.1-Setup.exe`、`latest.yml` 并发布到 Releases；已安装的客户端会在启动后或每 6 小时检查更新。
-
-- 本地发布需要 `GH_TOKEN`：
-
-  ```powershell
-  $env:GH_TOKEN = "github_pat_..."
-  pnpm --filter @nebula/desktop dist:publish
-  ```
+  Actions 会构建 `Nebula_0.3.0_x64-setup.exe` 并发布到 Releases；客户端启动 25 秒后检查一次，之后每 6 小时检查。发现新版本时下载到临时目录，设置页点「重启安装」后以 `/S` 静默运行 NSIS 安装包。
 
 - 未签名安装包仍可自动更新，但每次可能触发 SmartScreen。
 
@@ -388,7 +387,7 @@ apps/desktop/release/win-unpacked/Nebula.exe   # 免安装快速验证
 
 - 自签名证书不会绕过：请把 Caddy / 服务器根证书安装到 Windows 受信任根证书。
 - 局域网用 HTTPS 时，把 `https://<IP>:9443` 这类地址填进远程模式；`localhost` 的本机开发地址可直接用 HTTP。
-- 非 `localhost` 的 `http://` 地址会禁用麦克风/屏幕共享，设置页会警告。
+- 非 `localhost` 的 `http://` 地址在 WebView 中可能被视为不安全来源，麦克风可能无法启用，设置页会警告。
 
 ---
 
@@ -397,8 +396,10 @@ apps/desktop/release/win-unpacked/Nebula.exe   # 免安装快速验证
 ```powershell
 pnpm check                          # Astro + TypeScript 检查
 pnpm build                          # 生产构建前端
-pnpm desktop:typecheck              # Electron / 本地设置页类型检查
-pnpm desktop:build                  # 构建 Electron 主进程、preload 和本地页面
+pnpm desktop:typecheck              # Tauri 设置页类型检查
+pnpm desktop:ui                     # 只构建本地设置页
+pnpm desktop:build                  # Tauri 构建（含 NSIS 安装包）
+cd apps/desktop/src-tauri; cargo check
 
 cd apps/api
 uv sync --all-groups
@@ -415,34 +416,63 @@ uv run ruff format --check .
 - 可靠性：停掉 API → 客户端显示重连中 → 离线期间写入消息 → API 恢复后 WebSocket 自动重连，并恰好补回一次消息
 - Caddy：生产 HTTP、HTTPS（内部 CA，支持局域网 IP + `default_sni`）、`wss://` 与开发环境 HMR 均实测通过
 - SDR 兼容管线：强制开启后远端收到转换后的视频，停止共享与再次共享均正常
-- Electron：打包后 exe 能启动、首次设置保存后进入主窗口；全局快捷键注册；自定义屏幕源选择器、SDR 屏幕捕获、系统音频失败自动降级、关闭到托盘均实测通过
-- 自动更新：已生成 `latest.yml` / GitHub Actions 发布工作流，需发布首个 tag 后验证真实升级链路
+- Tauri 2：`cargo check` / debug / release 构建通过；远程 WebView 的 IPC（设置、音频设备、WGC 采集）实测可用
+- 原生采集：WGC 屏幕与窗口采集、FP16 → ACES → I420、本机 WebSocket 视频/音频分流、WASAPI loopback 音频包均实测通过；900p SDR 实测 30fps，1080p HDR FP16 在测试机约 21fps（设置里可切到 900p/720p）
+- 音频面板：耳机/扬声器手动覆盖会即时重启麦克风并切换 AEC；RNNoise → DeepFilterNet3 热切换实测通过
+- 自动更新：已切换为 GitHub Releases 资产 + NSIS 静默安装；需发布首个 tag 后验证真实升级链路
 
 ---
 
 ## HDR 屏幕共享
 
-当前 WebRTC 编码链路按 SDR 发送，不传输 HDR，因此应用会在采集端做一次 **HDR → SDR tone mapping**：
+WebRTC 编码链路按 SDR 发送，因此屏幕共享在采集端做一次 **HDR → SDR tone mapping**。
 
-- 检测到当前显示器为 HDR（`(dynamic-range: high)`）时自动启用。
-- 自动检测不准、或共享的是另一块 HDR 屏幕时，可在语音控制栏点 **「SDR 兼容」** 强制启用；该设置会保存在浏览器本地，重新共享后生效。
-- 实现方式是把屏幕轨道绘制到 sRGB 2D canvas，再由 `canvas.captureStream(30)` 生成 SDR 视频轨道；音频仍使用原始系统音频。Chrome 会在绘制时按 HDR 元数据做 tone mapping。
-- 如果开启后颜色仍明显异常，通常是 Windows/Chromium 的 HDR 屏幕采集问题（WGC / DXGI）。请更新 Chrome/Edge 和 Windows 11（24H2+ 使用 WGC 采集），或临时关闭 Windows HDR 再共享。
+### 桌面端（推荐）
+
+- WGC 请求 `Rgba16F`（scRGB 线性光），在 Rust 侧用 ACES filmic 曲线压高光，再编码为 sRGB。
+- 按设置画质等比例缩放（默认 900p，最高 1080p），转换为 BT.709 limited-range I420，目标 30 fps；帧时间戳随帧发送，Web 侧直接构造 `VideoFrame`，交给 WebRTC 编码器压缩。
+- 系统声音独立走 WASAPI loopback，不受画面 tone mapping 影响。
+- 自动检测到 HDR 显示器（`(dynamic-range: high)`）时请求 FP16；「SDR 兼容」可强制所有共享走 FP16 tone mapping。
+- 屏幕出现 `WGC 原生采集` / `HDR → SDR` 标记时，说明当前共享走了原生管线。
+
+### 浏览器端（回退）
+
+- 在没有 Tauri 桥接的普通浏览器中，仍使用 `getDisplayMedia`，并用 sRGB 2D canvas + `captureStream(30)` 生成 SDR 轨道。
+- 浏览器端的质量取决于 Chromium 对 HDR 采集的 tone mapping；桌面端原生管线是更可控的路径。
 
 > HDR 转换会增加一次画面拷贝，目标帧率为 30fps；只影响开启了转换的共享。
+
+## 音频处理管线
+
+音频在 Web Audio `AudioWorklet` 中运行，桌面端与网页端共用：
+
+| 阶段 | 实现 | 说明 |
+| --- | --- | --- |
+| AEC | 浏览器原生 AEC + 输出设备策略 | 检测到耳机自动关闭/减弱；扬声器保守开启；未知设备保守开启 |
+| 回声重合检测 | 麦克风/播放包络归一化互相关 | 在控制栏显示重合度；手动关闭 AEC 时可提示回声风险 |
+| VAD | 自适应噪声底 + 迟滞 + hangover | 阈值可调；空闲时门限衰减 |
+| ANS | RNNoise / DeepFilterNet3 WASM | RNNoise 适合持续噪声；DFN3 适合键盘、鼠标等瞬态噪声 |
+| Hush 预设 | DeepFilterNet3 强隔离参数 | 针对多人背景声；原始 Hush 权重需要额外的模型适配器 |
+| AGC | 目标 -20 dBFS + 平滑增益 + 软限幅 | 避免音量忽大忽小 |
+| DTX | Opus `usedtx=1` | 静音时停止发送 RTP 载荷，进一步节省带宽 |
+
+模型来源：[RNNoise](https://github.com/xiph/rnnoise)（BSD-3-Clause）与 [DeepFilterNet3](https://github.com/Rikorose/DeepFilterNet)（Apache-2.0 / MIT），WebAssembly 打包使用 [`@cc-livekit/audio-pipeline-plugin`](https://github.com/difftim/denoise-plugin)（Apache-2.0）。首次加入语音会加载约 18 MB 的降噪 WASM，之后由浏览器缓存。
 
 ## 已知限制 / 下一步
 
 - P2P mesh 超过 ~5 人时上行带宽和 CPU 会明显上升；后续可切换 LiveKit / mediasoup SFU。
 - 不支持 HDR 端到端透传；HDR 屏幕会转成 SDR 发送。
-- 屏幕共享推荐桌面版 Chrome / Edge；移动端浏览器和 Safari 对 `getDisplayMedia` 的支持有限。
+- 桌面端原生屏幕采集仅支持 Windows；普通浏览器仍回退到 `getDisplayMedia`。
+- HDR 原生采集目前是 8-bit SDR 输出 + 目标 30fps；1080p HDR/FP16 在测试机上约 20fps，建议用默认 900p。如果要 4K60/HDR 透传，需要 WebRTC HDR 编码链路或原生编码器。
+- 原生画面通过本机 WebSocket 传输 I420（1080p30 约 90 MB/s）；这是本机回环，不占用公网带宽。
+- Hush 预设当前复用 DeepFilterNet3 的强语音隔离参数，并未打包原始 Hush 8MB 权重；接入点在 `apps/web/src/lib/audio/ans.ts`。
+- 系统声音 loopback 依赖默认输出设备；没有可用输出设备时共享自动退化为纯画面。
 - 暂无附件上传、消息编辑、表情回应、未读角标、私信、多工作区。
 - 语音房间状态保存在单个 API 进程内存中；多实例部署需要 Redis pub/sub。
 - 公网通话需要 TURN；没有 TURN 时部分网络环境下只能单向或无法建立连接。
 - 同一账号多标签页共享登录态；语音按用户维度加入，建议一个账号只在一个标签页里开麦。
 - 目前没有登录频率限制、审计日志或端到端加密聊天；更适合个人 / 小团队自托管，不建议直接暴露在公网大规模使用。
-- Windows 客户端首版仅支持 x64、不带代码签名、无新消息通知、不包含后端；发布自动更新需要公开的 GitHub 仓库。
-- Windows 系统音频 loopback 受声卡/驱动影响，个别设备会自动退化为纯画面共享。
+- Windows 客户端仅支持 x64、不带代码签名；自动更新下载的是未签名 NSIS 安装包，可能触发 SmartScreen。
 
 ---
 

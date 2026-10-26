@@ -1,4 +1,7 @@
+import { audioEngine } from './audio/engine';
+import { startNativeCapture, type NativeCaptureSession } from './audio/nativeCapture';
 import { notifyDesktop } from './desktop';
+import { getPrefs } from './prefs';
 import { SdrScreenPipeline, isHdrDisplay, readForceSdr } from './screenCapture';
 import { useChatStore } from './store';
 import type { ServerEvent, VoiceParticipant } from './types';
@@ -14,6 +17,50 @@ type PeerState = {
   hasRemoteDescription: boolean;
   mediaAttached: boolean;
 };
+
+/**
+ * Opus discontinuous transmission stops sending RTP payloads while the VAD
+ * gate is closed, so an idle microphone costs almost no bandwidth. The SDP is
+ * rewritten before it reaches the peer connection.
+ */
+function enableOpusDtx(sdp: string): string {
+  const normalized = sdp.replace(/\r\n/g, '\n');
+  // Only the first audio m-section is the microphone. Applying DTX to the
+  // system-audio section would cut quiet passages out of shared music.
+  const blocks = normalized.split(/(?=^m=)/m);
+
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+    const block = blocks[blockIndex];
+    if (!block.startsWith('m=audio')) continue;
+
+    const opusPayloadType = /^a=rtpmap:(\d+)\s+opus\/48000/im.exec(block)?.[1];
+    if (!opusPayloadType) return sdp;
+
+    const fmtpPrefix = `a=fmtp:${opusPayloadType} `;
+    const lines = block.split('\n');
+    let found = false;
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!lines[index].startsWith(fmtpPrefix)) continue;
+      found = true;
+      let parameters = lines[index].slice(fmtpPrefix.length);
+      if (!/usedtx=/i.test(parameters)) parameters += ';usedtx=1';
+      if (!/useinbandfec=/i.test(parameters)) parameters += ';useinbandfec=1';
+      if (!/minptime=/i.test(parameters)) parameters += ';minptime=10';
+      lines[index] = fmtpPrefix + parameters;
+    }
+    if (!found) {
+      const rtpmapIndex = lines.findIndex((line) =>
+        line.toLowerCase().startsWith(`a=rtpmap:${opusPayloadType} `),
+      );
+      if (rtpmapIndex >= 0) {
+        lines.splice(rtpmapIndex + 1, 0, `${fmtpPrefix}usedtx=1;useinbandfec=1;minptime=10`);
+      }
+    }
+    blocks[blockIndex] = lines.join('\n');
+    return blocks.join('').replace(/\n/g, '\r\n');
+  }
+  return sdp;
+}
 
 function buildIceServers(): RTCIceServer[] {
   const servers: RTCIceServer[] = [
@@ -43,6 +90,7 @@ class VoiceClient {
   private micTrack: MediaStreamTrack | null = null;
   private screenStream: MediaStream | null = null;
   private screenPipeline: SdrScreenPipeline | null = null;
+  private nativeCapture: NativeCaptureSession | null = null;
   private peers = new Map<number, PeerState>();
   private orphanIce = new Map<number, RTCIceCandidateInit[]>();
   private muted = false;
@@ -110,11 +158,13 @@ class VoiceClient {
       remoteStreams: {},
       localScreen: null,
       localAudio: null,
+      screenHdr: false,
+      screenNative: false,
     });
 
     const hasMic = await this.acquireMic();
     if (token !== this.joinToken || this.channelId !== channelId) {
-      this.micStream?.getTracks().forEach((track) => track.stop());
+      void audioEngine.stop();
       this.micStream = null;
       this.micTrack = null;
       return;
@@ -216,6 +266,7 @@ class VoiceClient {
       this.muted = !this.muted;
     }
 
+    audioEngine.setMuted(this.muted);
     if (this.micTrack) {
       this.micTrack.enabled = !this.muted;
     }
@@ -227,7 +278,30 @@ class VoiceClient {
     });
   }
 
-  async toggleShare(): Promise<void> {
+  /** Applies microphone / AEC / denoiser changes without leaving the call. */
+  async updateAudioSettings(): Promise<void> {
+    const stream = await audioEngine.start(getPrefs().audio);
+    if (!stream) return;
+    await audioEngine.applyPreferences(getPrefs().audio);
+    const track = audioEngine.track ?? stream.getAudioTracks()[0] ?? null;
+    if (!track) return;
+    if (track !== this.micTrack) {
+      this.micTrack = track;
+      this.micStream = stream;
+      for (const peer of this.peers.values()) {
+        if (peer.audioSender) {
+          await peer.audioSender.replaceTrack(track);
+        }
+      }
+    }
+    track.enabled = !this.muted;
+    useChatStore.getState().setVoice({
+      localAudio: this.micStream,
+      muted: this.muted,
+    });
+  }
+
+  async toggleShare(source: 'screen' | 'window' = 'screen'): Promise<void> {
     if (this.sharing) {
       await this.stopShare();
       return;
@@ -235,73 +309,102 @@ class VoiceClient {
     if (this.channelId === null) return;
 
     let rawStream: MediaStream | null = null;
+    let stream: MediaStream | null = null;
     let audioFallback = false;
+    let toneMapped = false;
+    let native = false;
+
     try {
-      const options = {
-        video: {
-          frameRate: { ideal: 30, max: 30 },
-          cursor: 'always',
-        },
-        audio: true,
-        systemAudio: 'include',
-        selfBrowserSurface: 'exclude',
-        surfaceSwitching: 'include',
-        monitorTypeSurfaces: 'include',
-      };
-      try {
-        rawStream = await navigator.mediaDevices.getDisplayMedia(
-          options as DisplayMediaStreamOptions,
+      const quality = getPrefs().screenQuality;
+      if (window.__TAURI__) {
+        const session = await startNativeCapture(
+          isHdrDisplay() || readForceSdr(),
+          source,
+          quality,
         );
-      } catch (error) {
-        const errorName = (error as DOMException | undefined)?.name;
-        const desktop = window.nebulaDesktop;
-        if (errorName === 'NotReadableError' && desktop?.retryScreenShareWithoutAudio) {
-          audioFallback = true;
-          desktop.retryScreenShareWithoutAudio();
-          rawStream = await navigator.mediaDevices.getDisplayMedia({
-            ...options,
-            audio: false,
-            systemAudio: 'exclude',
-          } as DisplayMediaStreamOptions);
-        } else {
-          throw error;
+        if (!session) return; // The native picker was cancelled.
+        this.nativeCapture = session;
+        session.onEnded = () => {
+          void this.stopShare();
+        };
+        stream = session.stream;
+        toneMapped = session.info.hdr;
+        native = true;
+      } else {
+        const maxWidth = quality === '720p' ? 1280 : quality === '1080p' ? 1920 : 1600;
+        const maxHeight = quality === '720p' ? 720 : quality === '1080p' ? 1080 : 900;
+        const options = {
+          video: {
+            width: { ideal: maxWidth },
+            height: { ideal: maxHeight },
+            frameRate: { ideal: 30, max: 30 },
+            cursor: 'always',
+          },
+          audio: true,
+          systemAudio: 'include',
+          selfBrowserSurface: 'exclude',
+          surfaceSwitching: 'include',
+          monitorTypeSurfaces: 'include',
+        };
+        try {
+          rawStream = await navigator.mediaDevices.getDisplayMedia(
+            options as DisplayMediaStreamOptions,
+          );
+        } catch (error) {
+          const errorName = (error as DOMException | undefined)?.name;
+          if (errorName === 'NotReadableError') {
+            audioFallback = true;
+            rawStream = await navigator.mediaDevices.getDisplayMedia({
+              ...options,
+              audio: false,
+              systemAudio: 'exclude',
+            } as DisplayMediaStreamOptions);
+          } else {
+            throw error;
+          }
+        }
+
+        const rawVideoTrack = rawStream.getVideoTracks()[0];
+        if (!rawVideoTrack) {
+          rawStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        rawVideoTrack.contentHint = 'detail';
+        rawVideoTrack.addEventListener('ended', () => {
+          void this.stopShare();
+        });
+
+        stream = rawStream;
+        // WebRTC is SDR here. Force HDR screen captures through a canvas so
+        // Chrome tone-maps PQ/Rec.2020 to sRGB before encoding.
+        if (readForceSdr() || isHdrDisplay()) {
+          const pipeline = new SdrScreenPipeline(rawStream, 30);
+          if ((await pipeline.start()) && pipeline.stream) {
+            this.screenPipeline = pipeline;
+            stream = pipeline.stream;
+            toneMapped = true;
+          }
         }
       }
 
-      const rawVideoTrack = rawStream.getVideoTracks()[0];
-      if (!rawVideoTrack) {
-        rawStream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      rawVideoTrack.addEventListener('ended', () => {
-        void this.stopShare();
-      });
-
-      let stream = rawStream;
-      let toneMapped = false;
-
-      // WebRTC is SDR here. Force HDR screen captures through a canvas so
-      // Chrome tone-maps PQ/Rec.2020 to sRGB before encoding.
-      if (readForceSdr() || isHdrDisplay()) {
-        const pipeline = new SdrScreenPipeline(rawStream, 30);
-        if ((await pipeline.start()) && pipeline.stream) {
-          this.screenPipeline = pipeline;
-          stream = pipeline.stream;
-          toneMapped = true;
-        }
-      }
-
-      const videoTrack = stream.getVideoTracks()[0];
-      if (!videoTrack) {
+      const videoTrack = stream?.getVideoTracks()[0];
+      if (!stream || !videoTrack) {
         this.screenPipeline?.stop();
         this.screenPipeline = null;
-        rawStream.getTracks().forEach((track) => track.stop());
+        rawStream?.getTracks().forEach((track) => track.stop());
+        await this.nativeCapture?.stop().catch(() => undefined);
+        this.nativeCapture = null;
         return;
       }
 
       this.screenStream = stream;
       this.sharing = true;
       const screenAudioTrack = stream.getAudioTracks()[0] ?? null;
+      if (screenAudioTrack) {
+        // System audio is also played through the local speakers, so include
+        // it in the echo-correlation reference.
+        audioEngine.attachReference('screen-share', stream);
+      }
 
       for (const peer of this.peers.values()) {
         try {
@@ -319,14 +422,18 @@ class VoiceClient {
       useChatStore.getState().setVoice({
         sharing: true,
         localScreen: stream,
+        screenHdr: toneMapped,
+        screenNative: native,
       });
       chatSocket.send({
         type: 'voice.media',
         channel_id: this.channelId,
         sharing: true,
       });
+
       const notes: string[] = [];
-      if (toneMapped) notes.push('HDR 已转换为 SDR');
+      if (native) notes.push('WGC 原生采集');
+      if (toneMapped) notes.push('HDR → SDR tone mapping');
       if (audioFallback) notes.push('系统声音不可用，仅共享画面');
       useChatStore
         .getState()
@@ -339,18 +446,30 @@ class VoiceClient {
     } catch (error) {
       this.screenPipeline?.stop();
       this.screenPipeline = null;
+      await this.nativeCapture?.stop().catch(() => undefined);
+      this.nativeCapture = null;
       this.screenStream?.getTracks().forEach((track) => track.stop());
       this.screenStream = null;
       rawStream?.getTracks().forEach((track) => track.stop());
       this.sharing = false;
-      useChatStore.getState().setVoice({ sharing: false, localScreen: null });
+      useChatStore.getState().setVoice({
+        sharing: false,
+        localScreen: null,
+        screenHdr: false,
+        screenNative: false,
+      });
 
       const name = (error as DOMException | undefined)?.name;
       if (name === 'NotAllowedError') return;
       console.warn('[rtc] screen share failed', error);
       useChatStore
         .getState()
-        .showToast('无法启动屏幕共享，请检查浏览器权限', 'error');
+        .showToast(
+          window.__TAURI__
+            ? '无法启动原生屏幕共享，请重试或检查 Windows 隐私设置'
+            : '无法启动屏幕共享，请检查浏览器权限',
+          'error',
+        );
     }
   }
 
@@ -358,8 +477,10 @@ class VoiceClient {
     if (!this.sharing && !this.screenStream) return;
     const stream = this.screenStream;
     const pipeline = this.screenPipeline;
+    const native = this.nativeCapture;
     this.screenStream = null;
     this.screenPipeline = null;
+    this.nativeCapture = null;
     this.sharing = false;
 
     for (const peer of this.peers.values()) {
@@ -376,8 +497,15 @@ class VoiceClient {
     }
 
     pipeline?.stop();
+    audioEngine.detachReference('screen-share');
+    await native?.stop().catch(() => undefined);
     stream?.getTracks().forEach((track) => track.stop());
-    useChatStore.getState().setVoice({ sharing: false, localScreen: null });
+    useChatStore.getState().setVoice({
+      sharing: false,
+      localScreen: null,
+      screenHdr: false,
+      screenNative: false,
+    });
     if (this.channelId !== null) {
       chatSocket.send({
         type: 'voice.media',
@@ -395,15 +523,14 @@ class VoiceClient {
   private async acquireMic(): Promise<boolean> {
     if (this.micTrack) return true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const stream = await audioEngine.start(getPrefs().audio);
+      if (!stream) {
+        this.micStream = null;
+        this.micTrack = null;
+        return false;
+      }
       this.micStream = stream;
-      this.micTrack = stream.getAudioTracks()[0] ?? null;
+      this.micTrack = audioEngine.track ?? stream.getAudioTracks()[0] ?? null;
       if (this.micTrack) {
         this.micTrack.enabled = !this.muted;
       }
@@ -510,6 +637,9 @@ class VoiceClient {
 
     pc.ontrack = (event) => {
       remote.addTrack(event.track);
+      // Tap the incoming playback as the AEC / echo-overlap reference. The tap
+      // is analysis-only; normal playback still happens in the <audio> tags.
+      audioEngine.attachReference(String(peerId), remote);
       useChatStore.getState().setVoice({
         remoteStreams: {
           ...useChatStore.getState().voice.remoteStreams,
@@ -533,7 +663,9 @@ class VoiceClient {
 
   private async sendOffer(peerId: number, pc: RTCPeerConnection): Promise<void> {
     try {
-      await pc.setLocalDescription(await pc.createOffer());
+      const offer = await pc.createOffer();
+      const sdp = offer.sdp ? enableOpusDtx(offer.sdp) : offer.sdp;
+      await pc.setLocalDescription({ type: offer.type, sdp });
       const description = pc.localDescription;
       if (!description) return;
       chatSocket.send({
@@ -572,7 +704,8 @@ class VoiceClient {
     await this.flushCandidates(peer);
 
     const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    const answerSdp = answer.sdp ? enableOpusDtx(answer.sdp) : answer.sdp;
+    await pc.setLocalDescription({ type: answer.type, sdp: answerSdp });
     const description = pc.localDescription;
     if (!description) return;
     chatSocket.send({
@@ -671,6 +804,7 @@ class VoiceClient {
     peer.pc.onicecandidate = null;
     peer.pc.ontrack = null;
     peer.pc.close();
+    audioEngine.detachReference(String(peerId));
     this.peers.delete(peerId);
     this.orphanIce.delete(peerId);
     const streams = { ...useChatStore.getState().voice.remoteStreams };
@@ -684,7 +818,7 @@ class VoiceClient {
     }
     this.peers.clear();
     this.orphanIce.clear();
-    this.micStream?.getTracks().forEach((track) => track.stop());
+    void audioEngine.stop();
     this.screenPipeline?.stop();
     this.screenPipeline = null;
     this.screenStream?.getTracks().forEach((track) => track.stop());

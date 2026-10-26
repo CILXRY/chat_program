@@ -19,6 +19,8 @@ export const emptyVoice: VoiceState = {
   remoteStreams: {},
   localScreen: null,
   localAudio: null,
+  screenHdr: false,
+  screenNative: false,
 };
 
 interface InitPayload {

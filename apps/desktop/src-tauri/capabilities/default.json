@@ -1,0 +1,40 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Nebula main, settings and tray windows",
+  "windows": ["main", "settings"],
+  "remote": {
+    "urls": [
+      "http://*/*",
+      "http://*/**",
+      "https://*/*",
+      "https://*/**",
+      "http://localhost:*/*",
+      "http://127.0.0.1:*/*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "opener:default",
+    "allow-settings-get",
+    "allow-settings-save",
+    "allow-settings-test-server",
+    "allow-settings-close",
+    "allow-app-open-external",
+    "allow-app-version",
+    "allow-desktop-notify",
+    "allow-desktop-open-settings",
+    "allow-window-toggle",
+    "allow-audio-output-info",
+    "allow-capture-start",
+    "allow-capture-stop",
+    "allow-updater-check",
+    "allow-updater-install",
+    "allow-updater-state"
+  ]
+}

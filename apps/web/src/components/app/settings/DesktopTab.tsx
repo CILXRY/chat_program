@@ -15,7 +15,7 @@ export default function DesktopTab() {
       <div>
         <h3 className="text-sm font-semibold text-mist-100">桌面客户端</h3>
         <p className="mt-1 text-xs leading-5 text-mist-500">
-          窗口、托盘、开机启动和全局快捷键在原生设置里；账号和通知偏好与网页端共用。
+          窗口、托盘、开机启动、全局快捷键和原生采集在 Tauri 设置里；账号和通知偏好与网页端共用。
         </p>
       </div>
 
@@ -27,7 +27,7 @@ export default function DesktopTab() {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-mist-100">Nebula Desktop</p>
             <p className="text-[11px] text-mist-500">
-              {platform ? (platformLabel[platform] ?? platform) : '桌面环境'}
+              {platform ? (platformLabel[platform] ?? platform) : '桌面环境'} · Tauri 2
             </p>
           </div>
           <span className="rounded-full border border-mint-400/20 bg-mint-400/10 px-2 py-0.5 text-[10px] text-mint-400">
@@ -52,6 +52,8 @@ export default function DesktopTab() {
           <li>· 关闭到托盘、开机启动、启动时最小化</li>
           <li>· 语音 / 共享状态通知开关</li>
           <li>· 全局快捷键状态与自动更新</li>
+          <li>· WGC/DXGI 原生屏幕采集与 WASAPI 系统声音</li>
+          <li>· HDR FP16 → SDR ACES tone mapping</li>
         </ul>
       </div>
 

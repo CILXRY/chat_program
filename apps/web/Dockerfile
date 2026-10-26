@@ -4,10 +4,9 @@ RUN npm install -g pnpm@12.8.1
 
 WORKDIR /app
 
-ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
-
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/
+COPY apps/web/scripts ./apps/web/scripts
 COPY apps/desktop/package.json apps/desktop/
 RUN pnpm install --frozen-lockfile --filter @nebula/web...
 
