@@ -29,6 +29,7 @@
     "allow-app-version",
     "allow-desktop-notify",
     "allow-desktop-open-settings",
+    "allow-desktop-logout",
     "allow-window-toggle",
     "allow-audio-output-info",
     "allow-capture-start",

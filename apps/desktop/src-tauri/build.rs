@@ -9,6 +9,7 @@ fn main() {
             "app_version",
             "desktop_notify",
             "desktop_open_settings",
+            "desktop_logout",
             "window_toggle",
             "audio_output_info",
             "capture_start",
