@@ -255,12 +255,20 @@ export default function AudioSettingsPanel({
             RNNoise / DeepFilterNet3 使用 WASM 模型；Hush 预设使用 DeepFilterNet3 的强语音隔离参数，
             适合多人背景声环境。
           </p>
-          {state.running && !state.ansAvailable && prefs.audio.ansModel !== 'off' && (
-            <p className="mt-1 text-[10px] text-warn-400">
-              降噪模型没有加载成功，当前使用原始麦克风 + VAD/AGC。请检查服务器是否提供
-              /audio 资源。
+          {state.running && state.ansLoading && (
+            <p className="mt-1 text-[10px] text-mist-500">
+              降噪模型正在后台加载，当前先用原始麦克风 + VAD/AGC。
             </p>
           )}
+          {state.running &&
+            !state.ansLoading &&
+            !state.ansAvailable &&
+            prefs.audio.ansModel !== 'off' && (
+              <p className="mt-1 text-[10px] text-warn-400">
+                降噪模型没有加载成功，当前使用原始麦克风 + VAD/AGC。请检查服务器是否提供
+                /audio 资源。
+              </p>
+            )}
         </section>
 
         <section className="space-y-3 rounded-xl border border-white/[0.06] bg-base-950/40 p-3">

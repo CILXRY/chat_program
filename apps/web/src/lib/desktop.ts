@@ -69,6 +69,11 @@ export function onDesktopShortcut(
   }
 }
 
+export async function logoutDesktop(): Promise<boolean> {
+  if (!isTauri()) return false;
+  return (await invokeTauri<boolean>('desktop_logout')) === true;
+}
+
 export function openDesktopSettings(): void {
   if (isTauri()) {
     void invokeTauri('desktop_open_settings');

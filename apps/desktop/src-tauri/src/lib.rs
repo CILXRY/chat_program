@@ -16,7 +16,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            windows::show_main_window(app);
+            windows::show_main_window_async(app);
         }))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -97,6 +97,7 @@ pub fn run() {
             commands::app_version,
             commands::desktop_notify,
             commands::desktop_open_settings,
+            commands::desktop_logout,
             commands::window_toggle,
             commands::audio_output_info,
             commands::capture_start,

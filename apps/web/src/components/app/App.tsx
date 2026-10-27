@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import { notifyDesktop, onDesktopShortcut } from '../../lib/desktop';
+import {
+  logoutDesktop,
+  notifyDesktop,
+  onDesktopShortcut,
+} from '../../lib/desktop';
 import { getPrefs } from '../../lib/prefs';
 import { voiceClient } from '../../lib/rtc';
 import { useChatStore } from '../../lib/store';
@@ -124,6 +128,7 @@ export default function App(props: Props) {
   );
   const [createType, setCreateType] = useState<ChannelType | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     const unsubscribeEvent = chatSocket.onEvent((event: ServerEvent) => {
@@ -291,12 +296,28 @@ export default function App(props: Props) {
   }
 
   async function logout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    useChatStore.getState().clearVoice();
+    voiceClient.dispose();
     try {
-      await api.logout();
+      const native = await Promise.race([
+        logoutDesktop(),
+        new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 2500)),
+      ]);
+      if (native) return;
+    } catch {
+      // Fall through to the HTTP logout.
+    }
+    try {
+      await Promise.race([
+        api.logout(),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 2500)),
+      ]);
     } catch {
       // The cookie may already be gone; still send the user to the login page.
     }
-    window.location.assign('/login');
+    window.location.replace('/login');
   }
 
   if (!me) {
@@ -309,6 +330,14 @@ export default function App(props: Props) {
 
   return (
     <div className="relative z-10 flex h-dvh overflow-hidden bg-base-950">
+      {loggingOut && (
+        <div className="fixed inset-0 z-[120] grid place-items-center bg-base-950/85 backdrop-blur-sm">
+          <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-base-900 px-4 py-3 text-sm text-mist-300">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-mint-400" />
+            正在退出…
+          </div>
+        </div>
+      )}
       {sidebarOpen && (
         <button
           type="button"

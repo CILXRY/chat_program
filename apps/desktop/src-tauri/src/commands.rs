@@ -116,13 +116,7 @@ pub async fn settings_save(app: AppHandle, payload: SettingsPayload) -> SaveSett
     let needs_window =
         previous.server_url() != next.server_url() || app.get_webview_window("main").is_none();
     if needs_window {
-        if let Err(error) = windows::create_main_window(&app, &next.server_url(), true) {
-            return SaveSettingsResult {
-                ok: false,
-                error: Some(error),
-                snapshot: Some(snapshot(&app)),
-            };
-        }
+        windows::create_main_window_async(&app, next.server_url(), true);
     }
 
     if let Some(settings) = app.get_webview_window("settings") {
@@ -228,8 +222,43 @@ pub fn desktop_notify(app: AppHandle, title: String, body: String) {
 }
 
 #[tauri::command]
-pub fn desktop_open_settings(app: AppHandle) -> Result<(), String> {
-    windows::open_settings(&app, false)
+pub async fn desktop_open_settings(app: AppHandle) -> Result<(), String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let window_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = windows::open_settings(&window_app, false);
+        let _ = sender.send(result);
+    });
+    match tokio::time::timeout(Duration::from_secs(5), receiver).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("设置窗口任务已取消".to_string()),
+        Err(_) => Err("打开设置窗口超时".to_string()),
+    }
+}
+
+/// Clears the session cookie natively and sends the main window to /login.
+/// This is the reliable fallback for the logout button: even if the HTTP
+/// logout request or a page navigation is stuck, the HttpOnly cookie disappears.
+#[tauri::command]
+pub async fn desktop_logout(app: AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let current = window.url().map_err(|error| error.to_string())?;
+    if let Ok(cookies) = window.cookies_for_url(current.clone()) {
+        for cookie in cookies {
+            if cookie.name() == "nebula_token" {
+                let _ = window.delete_cookie(cookie);
+            }
+        }
+    }
+    let login = current
+        .join("/login")
+        .map_err(|error| format!("无法构造登录地址：{error}"))?;
+    window
+        .navigate(login)
+        .map_err(|error| format!("无法跳转登录页：{error}"))?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -253,7 +282,7 @@ pub fn updater_state(app: AppHandle) -> UpdateState {
 
 #[tauri::command]
 pub fn window_toggle(app: AppHandle) {
-    windows::toggle_main_window(&app);
+    windows::toggle_main_window_async(&app);
 }
 
 #[tauri::command]
