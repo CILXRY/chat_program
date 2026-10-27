@@ -97,7 +97,7 @@ pub fn register(app: &AppHandle) -> Vec<ShortcutStatus> {
 
 pub fn handle(app: &AppHandle, action: ShortcutAction) {
     match action {
-        ShortcutAction::ToggleWindow => crate::windows::toggle_main_window(app),
+        ShortcutAction::ToggleWindow => crate::windows::toggle_main_window_async(app),
         ShortcutAction::ToggleMute | ShortcutAction::LeaveVoice => {
             let payload = match action {
                 ShortcutAction::ToggleMute => "toggle-mute",
