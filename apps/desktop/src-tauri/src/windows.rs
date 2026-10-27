@@ -27,6 +27,42 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// Window creation dispatches to the Tauri main thread and blocks the caller.
+/// Never call this synchronously from an IPC command, tray callback, shortcut
+/// handler or the single-instance callback: those already run on the main
+/// thread and would deadlock the whole application.
+pub fn show_main_window_async(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        show_main_window(&app);
+    });
+}
+
+pub fn toggle_main_window_async(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        toggle_main_window(&app);
+    });
+}
+
+pub fn open_settings_async(app: &AppHandle, first_run: bool) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = open_settings(&app, first_run) {
+            eprintln!("[window] failed to open settings window: {error}");
+        }
+    });
+}
+
+pub fn create_main_window_async(app: &AppHandle, server_url: String, show: bool) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = create_main_window(&app, &server_url, show) {
+            eprintln!("[window] failed to open main window: {error}");
+        }
+    });
+}
+
 pub fn toggle_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let visible = window.is_visible().unwrap_or(false);

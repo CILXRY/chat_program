@@ -277,7 +277,16 @@ export default function VoiceStage({ channel, onOpenSidebar, onOpenMembers }: Pr
               <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 text-mist-500">
                 <LoaderCircle size={24} className="animate-spin text-mint-400" />
                 <p className="text-sm">正在建立语音连接…</p>
-                <p className="text-[11px] text-mist-600">如果浏览器询问权限，请选择允许</p>
+                <p className="text-[11px] text-mist-600">
+                  麦克风会在后台连接；如果权限窗口没有弹出，可以直接静音加入
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void voiceClient.joinMuted(channel.id)}
+                  className="rounded-lg border border-white/10 bg-base-850 px-3 py-1.5 text-[11px] text-mist-300 transition hover:border-white/20 hover:text-white"
+                >
+                  跳过麦克风，静音加入
+                </button>
               </div>
             ) : (
               <div className="mx-auto grid max-w-5xl gap-3 sm:grid-cols-2 2xl:grid-cols-3">

@@ -31,11 +31,11 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => crate::windows::toggle_main_window(app),
+            "show" => crate::windows::toggle_main_window_async(app),
             "mute" => crate::shortcuts::handle(app, crate::types::ShortcutAction::ToggleMute),
             "leave" => crate::shortcuts::handle(app, crate::types::ShortcutAction::LeaveVoice),
             "settings" => {
-                let _ = crate::windows::open_settings(app, false);
+                crate::windows::open_settings_async(app, false);
             }
             "quit" => {
                 let state = app.state::<AppState>();
@@ -55,7 +55,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                crate::windows::toggle_main_window(tray.app_handle());
+                crate::windows::toggle_main_window_async(tray.app_handle());
             }
         });
 

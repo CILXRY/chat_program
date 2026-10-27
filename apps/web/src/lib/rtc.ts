@@ -62,6 +62,13 @@ function enableOpusDtx(sdp: string): string {
   return sdp;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => window.setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 function buildIceServers(): RTCIceServer[] {
   const servers: RTCIceServer[] = [
     {
@@ -133,7 +140,7 @@ class VoiceClient {
     };
   }
 
-  async join(channelId: number): Promise<void> {
+  async join(channelId: number, options: { muted?: boolean } = {}): Promise<void> {
     const me = useChatStore.getState().me;
     if (!me) return;
     if (this.channelId === channelId) return;
@@ -143,7 +150,7 @@ class VoiceClient {
 
     this.channelId = channelId;
     this.selfId = me.id;
-    this.muted = false;
+    this.muted = options.muted === true;
     this.sharing = false;
     this.announcedConnected = false;
     const token = ++this.joinToken;
@@ -152,7 +159,7 @@ class VoiceClient {
     store.setVoice({
       channelId,
       status: 'connecting',
-      muted: false,
+      muted: this.muted,
       sharing: false,
       participants: [],
       remoteStreams: {},
@@ -162,26 +169,9 @@ class VoiceClient {
       screenNative: false,
     });
 
-    const hasMic = await this.acquireMic();
-    if (token !== this.joinToken || this.channelId !== channelId) {
-      void audioEngine.stop();
-      this.micStream = null;
-      this.micTrack = null;
-      return;
-    }
-
-    if (!hasMic) {
-      this.muted = true;
-      useChatStore
-        .getState()
-        .showToast('没有获取到麦克风权限，你已以静音状态加入', 'info');
-    }
-
-    useChatStore.getState().setVoice({
-      muted: this.muted,
-      localAudio: this.micStream,
-    });
-
+    // Enter the room first. Microphone and denoiser setup must never block
+    // joining: a slow permission prompt or an 18 MB model download used to
+    // leave the UI stuck at "connecting" forever.
     const sent = chatSocket.send({ type: 'voice.join', channel_id: channelId });
     if (!sent) {
       this.teardown();
@@ -189,13 +179,105 @@ class VoiceClient {
       useChatStore.getState().showToast('实时连接不可用，无法加入语音频道', 'error');
       return;
     }
+
     if (this.muted) {
       chatSocket.send({
         type: 'voice.media',
         channel_id: channelId,
         muted: true,
       });
+      useChatStore.getState().showToast('已以静音状态加入语音频道', 'info');
+      return;
     }
+
+    void this.startMicrophone(token, channelId);
+  }
+
+  /** Join even if the microphone permission prompt never resolves. */
+  async joinMuted(channelId: number): Promise<void> {
+    if (this.channelId === channelId) {
+      this.muted = true;
+      audioEngine.setMuted(true);
+      if (this.micTrack) this.micTrack.enabled = false;
+      useChatStore.getState().setVoice({
+        muted: true,
+        localAudio: this.micStream,
+      });
+      chatSocket.send({
+        type: 'voice.media',
+        channel_id: channelId,
+        muted: true,
+      });
+      return;
+    }
+    await this.join(channelId, { muted: true });
+  }
+
+  private async startMicrophone(token: number, channelId: number): Promise<void> {
+    const acquired = await withTimeout(this.acquireMic(), 15_000, false);
+    if (token !== this.joinToken || this.channelId !== channelId) {
+      if (acquired) void audioEngine.stop();
+      return;
+    }
+
+    if (!acquired) {
+      this.muted = true;
+      audioEngine.setMuted(true);
+      this.micStream = null;
+      this.micTrack = null;
+      useChatStore.getState().setVoice({
+        muted: true,
+        localAudio: null,
+      });
+      chatSocket.send({
+        type: 'voice.media',
+        channel_id: channelId,
+        muted: true,
+      });
+      useChatStore
+        .getState()
+        .showToast('麦克风未就绪，已以静音状态加入语音频道；可在控制栏重新开麦', 'info');
+      return;
+    }
+
+    if (this.muted) {
+      // The user pressed "静音加入" while the microphone was still starting.
+      // Keep the freshly acquired track for a later unmute, but do not
+      // override the explicit muted choice.
+      if (this.micTrack) this.micTrack.enabled = false;
+      audioEngine.setMuted(true);
+      useChatStore.getState().setVoice({
+        muted: true,
+        localAudio: this.micStream,
+      });
+      chatSocket.send({
+        type: 'voice.media',
+        channel_id: channelId,
+        muted: true,
+      });
+      return;
+    }
+
+    this.muted = false;
+    audioEngine.setMuted(false);
+    if (this.micTrack) this.micTrack.enabled = true;
+    for (const peer of this.peers.values()) {
+      if (!peer.audioSender) continue;
+      try {
+        await peer.audioSender.replaceTrack(this.micTrack);
+      } catch (error) {
+        console.warn('[rtc] failed to attach microphone to a peer', error);
+      }
+    }
+    useChatStore.getState().setVoice({
+      muted: false,
+      localAudio: this.micStream,
+    });
+    chatSocket.send({
+      type: 'voice.media',
+      channel_id: channelId,
+      muted: false,
+    });
   }
 
   leave(): void {

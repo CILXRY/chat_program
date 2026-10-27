@@ -23,6 +23,7 @@ export interface AudioEngineState {
   outputLabel: string;
   ansModel: AnsModel;
   ansAvailable: boolean;
+  ansLoading: boolean;
   metrics: AudioMetrics;
 }
 
@@ -34,8 +35,16 @@ const INITIAL_STATE: AudioEngineState = {
   outputLabel: '',
   ansModel: 'rnnoise',
   ansAvailable: true,
+  ansLoading: false,
   metrics: EMPTY_AUDIO_METRICS,
 };
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => window.setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
 
 function aecSupported(): boolean {
   return typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
@@ -63,6 +72,7 @@ class AudioEngine {
   private state: AudioEngineState = INITIAL_STATE;
   private metricsListeners = new Set<MetricsListener>();
   private stateListeners = new Set<StateListener>();
+  private ansGeneration = 0;
 
   get stream(): MediaStream | null {
     return this.finalStream;
@@ -132,7 +142,9 @@ class AudioEngine {
         await this.restartMic(prefs.micDeviceId, desiredAec);
       }
 
-      await this.ensurePipeline(prefs.ansModel);
+      // Do not block the call on the 18 MB noise-suppression model. Start with
+      // the raw microphone + VAD/AGC, then rewire to the denoised track when
+      // the worker is ready.
       this.rewireSource();
 
       this.finalTrack = this.destination.stream.getAudioTracks()[0] ?? null;
@@ -145,8 +157,28 @@ class AudioEngine {
         outputKind: this.output.kind,
         outputLabel: this.output.label,
         ansModel: prefs.ansModel,
-        ansAvailable: Boolean(this.pipeline) || prefs.ansModel === 'off',
+        ansAvailable: prefs.ansModel === 'off',
+        ansLoading: prefs.ansModel !== 'off',
       });
+
+      if (prefs.ansModel !== 'off') {
+        const generation = ++this.ansGeneration;
+        void this.ensurePipeline(prefs.ansModel)
+          .then(() => {
+            if (generation !== this.ansGeneration) return;
+            this.rewireSource();
+            this.updateState({
+              ansLoading: false,
+              ansAvailable: Boolean(this.pipeline),
+            });
+          })
+          .catch((error) => {
+            if (generation !== this.ansGeneration) return;
+            console.warn('[audio] noise suppression failed to load', error);
+            this.updateState({ ansLoading: false, ansAvailable: false });
+          });
+      }
+
       return this.finalStream;
     } catch (error) {
       console.warn('[audio] falling back to the browser microphone', error);
@@ -157,15 +189,20 @@ class AudioEngine {
   private async startFallback(prefs: AudioPrefs): Promise<MediaStream | null> {
     await this.disposeGraph();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: prefs.micDeviceId ? { exact: prefs.micDeviceId } : undefined,
-          echoCancellation: prefs.aecMode !== 'off',
-          noiseSuppression: true,
-          autoGainControl: prefs.agc,
-          channelCount: 1,
-        },
-      });
+      const stream = await withTimeout<MediaStream | null>(
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: prefs.micDeviceId ? { exact: prefs.micDeviceId } : undefined,
+            echoCancellation: prefs.aecMode !== 'off',
+            noiseSuppression: true,
+            autoGainControl: prefs.agc,
+            channelCount: 1,
+          },
+        }),
+        8_000,
+        null,
+      );
+      if (!stream) return null;
       this.rawStream = stream;
       this.finalStream = stream;
       this.finalTrack = stream.getAudioTracks()[0] ?? null;
@@ -179,6 +216,7 @@ class AudioEngine {
         outputLabel: this.output.label,
         ansModel: prefs.ansModel,
         ansAvailable: false,
+        ansLoading: false,
       });
       return stream;
     } catch {
@@ -187,6 +225,7 @@ class AudioEngine {
   }
 
   async stop(): Promise<void> {
+    this.ansGeneration += 1;
     await this.disposeGraph();
     this.fallback = false;
     this.muted = false;
@@ -251,6 +290,7 @@ class AudioEngine {
       outputLabel: output.label,
       ansModel: prefs.ansModel,
       ansAvailable: Boolean(this.pipeline) || prefs.ansModel === 'off',
+      ansLoading: prefs.ansModel !== 'off' && !this.pipeline,
     });
   }
 
@@ -285,16 +325,21 @@ class AudioEngine {
   }
 
   private async openMic(deviceId: string, echoCancellation: boolean): Promise<MediaStream> {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
-        echoCancellation,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: { ideal: 1 },
-        sampleRate: { ideal: 48000 },
-      },
-    });
+    const stream = await withTimeout<MediaStream | null>(
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          echoCancellation,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: { ideal: 1 },
+          sampleRate: { ideal: 48000 },
+        },
+      }),
+      10_000,
+      null,
+    );
+    if (!stream) throw new Error('等待麦克风权限超时');
     return stream;
   }
 
@@ -317,20 +362,29 @@ class AudioEngine {
   }
 
   private async applyAnsModel(model: AnsModel): Promise<void> {
+    const generation = ++this.ansGeneration;
     if (model === 'off') {
       const previous = this.pipeline;
       this.pipeline = null;
       await previous?.dispose();
       this.rewireSource();
+      this.updateState({ ansModel: model, ansLoading: false, ansAvailable: true });
       return;
     }
     if (!this.pipeline) {
+      this.updateState({ ansModel: model, ansLoading: true });
       await this.ensurePipeline(model);
-      this.rewireSource();
+      if (generation === this.ansGeneration) {
+        this.rewireSource();
+        this.updateState({
+          ansLoading: false,
+          ansAvailable: Boolean(this.pipeline),
+        });
+      }
       return;
     }
     await this.pipeline.setModel(model);
-    this.updateState({ ansModel: model });
+    this.updateState({ ansModel: model, ansLoading: false, ansAvailable: true });
   }
 
   private rewireSource(): void {
@@ -371,7 +425,11 @@ class AudioEngine {
   }
 
   private async resolveOutput(prefs: AudioPrefs): Promise<AudioOutputInfo> {
-    const detected = await detectOutputInfo();
+    const detected = await withTimeout(
+      detectOutputInfo(),
+      1_500,
+      { kind: 'unknown' as const, label: '', detected: false },
+    );
     if (prefs.outputOverride === 'auto') return detected;
     return {
       kind: prefs.outputOverride,
@@ -434,6 +492,7 @@ class AudioEngine {
       next.outputLabel === this.state.outputLabel &&
       next.ansModel === this.state.ansModel &&
       next.ansAvailable === this.state.ansAvailable &&
+      next.ansLoading === this.state.ansLoading &&
       next.running === this.state.running &&
       next.metrics === this.state.metrics
     ) {
